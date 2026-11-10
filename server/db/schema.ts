@@ -402,6 +402,29 @@ export const commentAiRequests = table(
   ],
 );
 
+/** Short-lived, single-use authorization for one explicit recipe scaling turn. */
+export const recipeScalingGrants = table(
+  "recipe_scaling_grants",
+  {
+    tokenHash: text("token_hash").primaryKey(),
+    ownerEmail: text("owner_email").notNull(),
+    documentId: text("document_id").notNull(),
+    factor: text("factor").notNull(),
+    expiresAt: text("expires_at").notNull(),
+    boundThreadId: text("bound_thread_id"),
+    boundTurnId: text("bound_turn_id"),
+    boundMessageId: text("bound_message_id"),
+    consumedAt: text("consumed_at"),
+    createdAt: text("created_at").notNull().default(now()),
+  },
+  (grant) => [
+    index("recipe_scaling_grants_owner_expiry_idx").on(
+      grant.ownerEmail,
+      grant.expiresAt,
+    ),
+  ],
+);
+
 export const commentAiAttempts = table(
   "comment_ai_attempts",
   {
