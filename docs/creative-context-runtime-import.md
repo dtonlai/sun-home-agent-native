@@ -123,3 +123,46 @@ why this runtime still loads the external package directly before changing
 configuration further. The exact route/action from the original user report
 remains unknown; `/settings` independently confirms the issue on a route that
 imports the package.
+
+## P1P-T04 source trace: development SSR loader
+
+Source inspection for Core 0.226.0, Vite 8.1.0, and Nitro 3.0.260903-beta
+confirms the dev request path:
+
+1. Core's CLI `dev` command launches the local Vite executable
+   (`node_modules/@agent-native/core/dist/cli/index.js`, `case "dev"`).
+2. Core's Vite plugin detects the app's `ssr-entry.ts` and registers it as
+   Nitro's `experimental.vite.services.ssr.entry`. This entry calls
+   `createRequestHandler(() => import("virtual:react-router/server-build"))`.
+3. Nitro's Vite integration routes that SSR service through its `ssr`
+   environment. Its dev worker imports the entry with Vite's `ModuleRunner`
+   (`node_modules/.pnpm/nitro@3.0.260903-beta/node_modules/nitro/dist/runtime/internal/vite/dev-worker.mjs`);
+   Nitro's SSR renderer dispatches requests to that service. React Router's
+   own dev middleware also imports its server build with
+   `ssrEnvironment.runner.import(...)` (`node_modules/@react-router/dev/dist/vite.js`).
+
+This is Vite's environment module runner, not a prebuilt production server
+bundle or direct native Node import of the app's route bundle. The runner
+transforms modules itself but delegates externalized dependencies to Node;
+that matches the captured `ModuleLoader` stack and the package file path in
+the error.
+
+Core's dev config construction appends the configured package string to
+`ssr.noExternal` (`node_modules/@agent-native/core/dist/vite/client.js`). Vite
+8.1.0 maps this legacy SSR option to the `ssr` environment's
+`resolve.noExternal` (`node_modules/vite/dist/node/chunks/node.js` around
+35168). React Router and Nitro then define the `ssr` environment without
+source code explicitly removing that entry. Therefore source configuration
+indicates the resolved SSR environment should include
+`@agent-native/creative-context`; the previous run did not capture the final
+runtime environment object, so this is not a runtime dump.
+
+The remaining contradiction is that Node handled the package import even
+though Core's configuration construction includes it in `noExternal`. Source
+inspection identifies no supported config change that explains or fixes this
+specific run. The smallest next diagnostic is to inspect the live
+`server.environments.ssr.config.resolve.noExternal` and Vite runner's
+externalization result in one approved dev run. Until that confirms whether
+the option was lost during environment resolution or a different loader path
+was used, keep the implementation unchanged; no package patch or extra SSR
+override is justified by the evidence so far.
