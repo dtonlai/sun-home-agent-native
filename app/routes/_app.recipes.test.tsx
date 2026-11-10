@@ -25,11 +25,22 @@ const fixture = vi.hoisted(() => ({
   search: "",
   listCalls: [] as Array<{ args: Record<string, unknown>; enabled: boolean }>,
   documentCalls: [] as Array<Record<string, unknown>>,
+  scaleMutation: {
+    mutateAsync: vi.fn(),
+    isPending: false,
+  },
+  sendCalls: [] as Array<Record<string, unknown>>,
 }));
 
 vi.mock("@agent-native/core/client/hooks", () => ({
   actionErrorMessage: (error: unknown) =>
     error instanceof Error ? error.message : undefined,
+  useActionMutation: (name: string) => {
+    if (name !== "start-recipe-scaling") {
+      throw new Error(`Unexpected action mutation ${name}`);
+    }
+    return fixture.scaleMutation;
+  },
   useSession: () => ({
     session: { email: "alice@example.com", orgId: "org-1" },
   }),
@@ -63,6 +74,12 @@ vi.mock("@agent-native/core/client/hooks", () => ({
       );
     }
     throw new Error(`Unexpected action query ${name}`);
+  },
+}));
+
+vi.mock("@agent-native/core/client/agent-chat", () => ({
+  sendToAgentChat: (input: Record<string, unknown>) => {
+    fixture.sendCalls.push(input);
   },
 }));
 
@@ -113,6 +130,31 @@ function render(root: Root) {
   act(() => root.render(<RecipesLibrary />));
 }
 
+function setupSelectedRecipe() {
+  fixture.search = "?spaceId=caller-space-id&recipeId=recipe-stable-id";
+  fixture.spaces.data = {
+    spaces: [{ id: "caller-space-id", name: "Recipes", orgId: null }],
+  };
+  fixture.pages.set(0, {
+    data: {
+      documents: [{ id: "recipe-stable-id", title: "Tomato Soup" }],
+      pagination: { hasMore: false, nextOffset: null },
+    },
+    isLoading: false,
+    isError: false,
+    isFetching: false,
+    error: null,
+    refetch: vi.fn(),
+  });
+  fixture.document.data = {
+    id: "recipe-stable-id",
+    spaceId: "caller-space-id",
+    title: "Tomato Soup",
+    content:
+      "Servings: 4\n\n## Ingredients\n- 4 tomatoes\n\n## Method\nSimmer.",
+  };
+}
+
 describe("Recipes library", () => {
   let container: HTMLDivElement;
   let root: Root;
@@ -132,6 +174,15 @@ describe("Recipes library", () => {
     fixture.search = "";
     fixture.listCalls = [];
     fixture.documentCalls = [];
+    fixture.scaleMutation.mutateAsync.mockReset();
+    fixture.scaleMutation.mutateAsync.mockResolvedValue({
+      grantToken: "grant-token-with-at-least-forty-characters-1234567890",
+      documentId: "recipe-stable-id",
+      factor: 2,
+      expiresAt: "2026-11-10T00:00:00.000Z",
+    });
+    fixture.scaleMutation.isPending = false;
+    fixture.sendCalls = [];
     container = document.createElement("div");
     document.body.appendChild(container);
     root = createRoot(container);
@@ -332,7 +383,82 @@ describe("Recipes library", () => {
     expect(container.textContent).toContain("recipes.recipeUnavailable");
     expect(container.textContent).not.toContain("Private page title");
     expect(container.textContent).not.toContain("Private page body");
+    expect(
+      [...container.querySelectorAll("button")].some((button) =>
+        button.textContent?.includes("recipes.scale"),
+      ),
+    ).toBe(false);
     expect(fixture.documentCalls).toContainEqual({ id: "private-document-id" });
+  });
+
+  it("changes scale selection locally without creating a grant or sending chat", () => {
+    setupSelectedRecipe();
+    render(root);
+
+    const select = container.querySelector("select");
+    expect(select).not.toBeNull();
+    expect(
+      [...(select?.querySelectorAll("option") ?? [])].map(
+        (option) => option.value,
+      ),
+    ).toEqual(["0.5", "1", "1.5", "2", "custom"]);
+    act(() => {
+      if (!select) return;
+      select.value = "1.5";
+      select.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+
+    expect(fixture.scaleMutation.mutateAsync).not.toHaveBeenCalled();
+    expect(fixture.sendCalls).toEqual([]);
+  });
+
+  it("creates a grant and dispatches one visible scoped scaling request", async () => {
+    setupSelectedRecipe();
+    render(root);
+
+    const scaleButton = [...container.querySelectorAll("button")].find(
+      (button) => button.textContent?.includes("recipes.scale"),
+    );
+    expect(scaleButton).toBeDefined();
+    await act(async () => {
+      scaleButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+
+    expect(fixture.scaleMutation.mutateAsync).toHaveBeenCalledWith({
+      documentId: "recipe-stable-id",
+      factor: 2,
+    });
+    expect(fixture.sendCalls).toEqual([
+      {
+        message: "recipes.scalingRequest",
+        context: JSON.stringify({ documentId: "recipe-stable-id", factor: 2 }),
+        actionScope: {
+          kind: "sun-home-recipe-scaling",
+          grantToken: "grant-token-with-at-least-forty-characters-1234567890",
+        },
+        submit: true,
+        openSidebar: true,
+      },
+    ]);
+  });
+
+  it("does not dispatch when grant creation fails", async () => {
+    setupSelectedRecipe();
+    fixture.scaleMutation.mutateAsync.mockRejectedValueOnce(
+      new Error("Grant creation failed"),
+    );
+    render(root);
+
+    const scaleButton = [...container.querySelectorAll("button")].find(
+      (button) => button.textContent?.includes("recipes.scale"),
+    );
+    await act(async () => {
+      scaleButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+
+    expect(fixture.scaleMutation.mutateAsync).toHaveBeenCalledTimes(1);
+    expect(fixture.sendCalls).toEqual([]);
+    expect(container.textContent).toContain("Grant creation failed");
   });
 });
 

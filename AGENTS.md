@@ -71,6 +71,13 @@ Relevant installed skill guides may include `content`, `document-editing`, `acti
   it. Use the Recipes route for navigation and retain the stable ID in its URL.
   Keep these operations read-only; never create a Recipes space or create, move,
   or edit Content automatically.
+- For explicit scaling, the Recipes UI alone calls `start-recipe-scaling` after
+  the user presses Scale; changing a factor is local-only. The UI sends only
+  `{ documentId, factor }` as chat context and the opaque grant in `actionScope`.
+  The scoped agent turn reads the source with `get-document`, then submits its
+  validated bounded result to `submit-recipe-scaling-result`. Do not repeat or
+  expose the grant token, send the full source body as context, or write a
+  scaled copy to Content. The result action renders an ephemeral comparison.
 - Recipes reads Content documents by stable identifiers. Changes to a source document must appear in Recipes; do not silently duplicate canonical recipe data.
 - Keep recipe parsing/template requirements minimal for the first proof of functionality. Use a representative sample recipe; defer a comprehensive schema.
 - Support 0.5×, 1×, 1.5×, 2×, and custom scaling. **Invoke the model only on an explicit Scale action.**

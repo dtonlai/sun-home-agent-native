@@ -53,6 +53,11 @@ export default defineAction({
     "Submit a validated scaled recipe matching the active Sun Home recipe scaling scope's source document and factor. This action validates and returns data without calling a model or changing Content.",
   schema: recipeScalingResultSchema,
   outputSchema: recipeScalingResultSchema,
+  chatUI: {
+    renderer: "sun-home.recipe-scaling-result",
+    title: "Scaled recipe comparison",
+    projectResult: (_args, result) => result,
+  },
   http: false,
   readOnly: true,
   mcpTool: false,
