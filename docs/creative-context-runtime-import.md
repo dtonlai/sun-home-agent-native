@@ -166,3 +166,51 @@ externalization result in one approved dev run. Until that confirms whether
 the option was lost during environment resolution or a different loader path
 was used, keep the implementation unchanged; no package patch or extra SSR
 override is justified by the evidence so far.
+
+## P1P-T04 targeted debug run
+
+Michael authorized one diagnostic dev run on 2026-11-10. Before starting, no
+`agent-native dev`, Vite, Nitro, or React Router dev process was present and
+ports 8080/9229 had no listeners. Resources: 10 processors; load
+`0.09, 0.23, 0.22`; 7.9 GiB memory total with 6.5 GiB available; 5.8 GB free
+disk; inotify watches/instances/queue `65194/128/16384`; file descriptor limit
+`1048576`.
+
+The package script is `agent-native dev --inspect`. Core CLI `dev` removes the
+Node inspect flag and forwards remaining args to the Vite executable via
+`runDevServer(vite, rest)` (`node_modules/@agent-native/core/dist/cli/index.js`
+and `cli/process.js`). Ran exactly once:
+
+```sh
+pnpm dev -- --debug
+```
+
+Vite 8.1.0 started at `http://localhost:8080/`; debug output confirmed the
+flag was active. The resolved config contains **two server environments with
+different `noExternal` lists**:
+
+- `environmentName: 'ssr'` includes `@agent-native/creative-context` in
+  `resolve.noExternal`.
+- `environmentName: 'nitro'` does not include it. Its `noExternal` list has
+  Nitro/runtime dependency patterns, WASM/TS patterns, virtual IDs, and
+  app-local files, but no Creative Context package entry.
+
+The one requested curl to `/settings` returned HTTP 500, text/plain, 577
+bytes, in 6.566746 seconds. The `[ssr-handler]` error again shows Node's ESM
+`ModuleLoader` trying to load `CreativeContextPanel.js`'s extensionless
+`./AgentMark` import directly from the installed package. The trace contains
+no explicit Vite “externalized” diagnostic and no transform log for
+`CreativeContextPanel.js`; the Node loader path and the absence of the package
+from the `nitro` environment's `noExternal` list are direct evidence
+consistent with externalization in that environment. The configured
+`ssr.noExternal` entry applies to Vite's `ssr` environment, while this H3 SSR
+request is handled by the Nitro catch-all route, so the option was present but
+on a different environment from the failing route's loader.
+
+Stopped the dev process immediately after the request; process and port
+checks afterward were empty. Watcher-limit polling fallbacks appeared during
+startup. No config, package, dependency, OS, or sandbox changes were made. The
+smallest next-step proposal for review is to determine whether the installed
+Core/Nitro integration supports adding this package to the `nitro`
+environment's `resolve.noExternal`, then test only after explicit approval;
+do not treat this diagnostic as authorization to implement that change.
