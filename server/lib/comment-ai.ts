@@ -35,6 +35,7 @@ import {
   type StartCommentAiResult,
 } from "../../shared/comment-ai.js";
 import { getDb, schema } from "../db/index.js";
+import { resolveRecipeScalingActionSurface } from "./recipe-scaling-action-surface.js";
 
 const TERMINAL_SUCCESS = ["replied", "suggested", "resolved"] as const;
 const MAX_ATTEMPTS = 2;
@@ -122,10 +123,13 @@ type CommentRow = typeof schema.documentComments.$inferSelect;
 type CommentSource = Awaited<ReturnType<typeof readCommentAiSource>>;
 type CommentAiActionSurfaceDetails = {
   ownerEmail: string | null;
+  orgId?: string | null;
   threadId?: string;
+  mode?: "act" | "plan";
   requestedTurnId?: string;
   queuedMessageId?: string;
   actionScope?: Readonly<Record<string, unknown>>;
+  availableActionNames?: readonly string[];
 };
 
 export class CommentAiOperationError extends Error {
@@ -826,6 +830,9 @@ export async function startCommentAiRequest(
 export async function resolveCommentAiActionSurface(
   details: CommentAiActionSurfaceDetails,
 ) {
+  const recipeScalingSurface = await resolveRecipeScalingActionSurface(details);
+  if (recipeScalingSurface) return recipeScalingSurface;
+
   const parsedClassifierActionScope =
     commentAiClassifierActionScopeSchema.safeParse(details.actionScope);
   const declaresClassifierScope =

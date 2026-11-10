@@ -99,6 +99,83 @@ afterAll(() => {
 });
 
 describe("comment AI request persistence", () => {
+  it("keeps recipe result validation out of ordinary chat and preserves both comment-AI scopes", async () => {
+    const ordinary = await commentAi.resolveCommentAiActionSurface({
+      ownerEmail: OWNER,
+      availableActionNames: [
+        "get-document",
+        "submit-recipe-scaling-result",
+        "search-documents",
+      ],
+    });
+    expect(ordinary).toEqual({ mode: "default" });
+
+    const classifier = await asUser(OWNER, () =>
+      commentAi.startCommentAiRequest({
+        ...startArgs(FIRST_REQUEST_ID),
+        intent: undefined,
+        submittedMode: "auto",
+        instructions: "Classify this comment.",
+      }),
+    );
+    const classifierRequest = await asUser(OWNER, () =>
+      commentAi.loadCommentAiRequest(FIRST_REQUEST_ID),
+    );
+    const classifierSurface = await asUser(OWNER, () =>
+      commentAi.resolveCommentAiActionSurface({
+        ownerEmail: OWNER,
+        threadId: classifier.pendingSession.backgroundSession.threadId,
+        requestedTurnId: classifierRequest.classificationTurnId ?? undefined,
+        queuedMessageId: `${FIRST_REQUEST_ID}:classification`,
+        actionScope: {
+          kind: "content-comment-ai-classifier",
+          requestId: FIRST_REQUEST_ID,
+        },
+      }),
+    );
+    expect(classifierSurface).toEqual({
+      allowedActionNames: ["submit-comment-ai-classification"],
+      actionScope: {
+        kind: "content-comment-ai-classifier",
+        requestId: FIRST_REQUEST_ID,
+      },
+    });
+
+    await getDb()
+      .update(schema.commentAiRequests)
+      .set({ status: "failed" })
+      .where(eq(schema.commentAiRequests.id, FIRST_REQUEST_ID));
+
+    const operation = await asUser(OWNER, () =>
+      commentAi.startCommentAiRequest(startArgs(SECOND_REQUEST_ID)),
+    );
+    const operationRequest = await asUser(OWNER, () =>
+      commentAi.loadCommentAiRequest(SECOND_REQUEST_ID),
+    );
+    const operationSurface = await asUser(OWNER, () =>
+      commentAi.resolveCommentAiActionSurface({
+        ownerEmail: OWNER,
+        threadId: operation.agentThreadId ?? undefined,
+        queuedMessageId: SECOND_REQUEST_ID,
+        requestedTurnId: operationRequest.agentTurnId ?? undefined,
+        actionScope: {
+          kind: "content-comment-ai",
+          requestId: SECOND_REQUEST_ID,
+        },
+      }),
+    );
+    expect(operationSurface).toMatchObject({
+      allowedActionNames: [
+        "get-comment-ai-context",
+        "reply-to-comment-ai-request",
+      ],
+      actionScope: {
+        kind: "content-comment-ai",
+        requestId: SECOND_REQUEST_ID,
+      },
+    });
+  });
+
   it("persists an Auto submission and exposes its exact private classifier session", async () => {
     const result = await asUser(OWNER, () =>
       commentAi.startCommentAiRequest({
