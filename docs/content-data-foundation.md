@@ -104,9 +104,15 @@ copy the body into a Recipes table.
 
 Content currently has no recipe-specific document type or list filter. The
 available `documentType` only distinguishes ordinary pages from collection
-pages. A recipe-specific space, title convention, or other discovery policy
-needs product/lead agreement before the Recipes UI claims to list only recipes;
-the stable-ID retrieval contract does not depend on that choice.
+pages. For Recipes v1, the lead-approved discovery convention is a dedicated
+Content space whose name is exactly `Recipes` (case-sensitive). Resolve the
+current caller's authorized spaces with `list-content-spaces` at runtime and
+use the matching space ID returned for that installation; never hardcode an
+ID. If the caller has no exact match, show setup guidance without provisioning
+the space or moving documents. If multiple authorized spaces have that exact
+name, let the caller choose between those returned spaces. This is a discovery
+convention only: all documents remain ordinary Content pages and the stable-ID
+retrieval contract is unchanged.
 
 ## Local CRUD and restart verification
 
