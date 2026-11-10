@@ -1,9 +1,10 @@
 # Content persistence and Recipes read contract
 
 This note audits the merged standalone Content app for the Phase 2/3 Recipes
-integration. Evidence was checked against installed `@agent-native/core`
-0.226.0 docs/source and the repository's current schema, plugins, scripts, and
-action definitions. No database was opened or changed.
+integration. The persistence/migration review was checked against installed
+`@agent-native/core` 0.226.0 docs/source and the repository's schema, plugins,
+scripts, and action definitions. A later isolated local PGlite CRUD/restart
+verification is recorded below; it did not use the product owner's database.
 
 ## Persistence and schema
 
@@ -106,6 +107,58 @@ available `documentType` only distinguishes ordinary pages from collection
 pages. A recipe-specific space, title convention, or other discovery policy
 needs product/lead agreement before the Recipes UI claims to list only recipes;
 the stable-ID retrieval contract does not depend on that choice.
+
+## Local CRUD and restart verification
+
+Verified 2026-11-10 with the registered Content actions and the Core action
+CLI. Runtime was Node `v24.22.2`, pnpm `10.14.0`, and
+`@agent-native/core` `0.226.0`. The only database setting was the task-isolated
+local URL `pglite:/tmp/p2c-t02-content-crud-20261110`; no non-local database
+URL was configured. The CLI used Core's documented local developer identity
+setting `AGENT_USER_EMAIL=dwight-p2c-t02@localhost` (not a credential). No
+browser automation was used.
+
+Successful commands run, with the same `DATABASE_URL` and `AGENT_USER_EMAIL`
+on every action invocation (the first create attempt omitted
+`AGENT_USER_EMAIL` and correctly failed `Not authenticated` before creating a
+document):
+
+```sh
+DATABASE_URL=pglite:/tmp/p2c-t02-content-crud-20261110 pnpm dev
+DATABASE_URL=pglite:/tmp/p2c-t02-content-crud-20261110 \
+  AGENT_USER_EMAIL=dwight-p2c-t02@localhost \
+  pnpm action create-document '{"title":"P2C-T02 Local Persistence Sample Recipe","content":"## Ingredients\n- 1 cup flour\n- 1 cup milk\n\n## Method\nWhisk the flour and milk until smooth.","contextModeOverride":"off"}'
+DATABASE_URL=pglite:/tmp/p2c-t02-content-crud-20261110 \
+  AGENT_USER_EMAIL=dwight-p2c-t02@localhost \
+  pnpm action get-document '{"id":"9iPVcgcPHu97"}'
+DATABASE_URL=pglite:/tmp/p2c-t02-content-crud-20261110 \
+  AGENT_USER_EMAIL=dwight-p2c-t02@localhost \
+  pnpm action edit-document '{"id":"9iPVcgcPHu97","baseRevision":"body:0:sha256:03243f5146bed19de6cf5c4cba89a1d68565d1e3628a124ea22d1dbc60b93c07","idempotencyKey":"p2c-t02-recipe-edit-20261110-1","find":"Whisk the flour and milk until smooth.","replace":"Whisk the flour and milk until smooth; rest for 5 minutes before cooking.","contextModeOverride":"off"}'
+DATABASE_URL=pglite:/tmp/p2c-t02-content-crud-20261110 \
+  AGENT_USER_EMAIL=dwight-p2c-t02@localhost \
+  pnpm action get-document '{"id":"9iPVcgcPHu97"}'
+# Stop pnpm dev with Ctrl-C, then start the same command again.
+DATABASE_URL=pglite:/tmp/p2c-t02-content-crud-20261110 pnpm dev
+DATABASE_URL=pglite:/tmp/p2c-t02-content-crud-20261110 \
+  AGENT_USER_EMAIL=dwight-p2c-t02@localhost \
+  pnpm action get-document '{"id":"9iPVcgcPHu97"}'
+```
+
+`pnpm dev` served `GET /` with HTTP 200 both before and after restart. Create
+returned Content ID `9iPVcgcPHu97`; the initial get returned the same ID and
+the saved ingredient/method body at revision 0. `edit-document` applied one
+revision-guarded edit and reported `readback.verified: true`, moving the body
+revision from 0 to 1. The following get returned the same ID, revision 1, and
+the edited method. After stopping the server and restarting against the same
+PGlite directory, get again returned ID `9iPVcgcPHu97`, revision 1, and the
+edited method. The sample exists only in that isolated sandbox database; the
+directory was retained. This validates local action persistence across an app
+restart, not the product owner's database, hosted PostgreSQL, multi-user
+sharing, or browser behavior.
+
+During both starts Nitro reported its existing watcher-limit `ENOSPC` fallback
+to polling for filesystem watches. The server still served HTTP 200 and all
+Content actions completed; no watcher or OS settings were changed.
 
 ## Evidence checked
 
