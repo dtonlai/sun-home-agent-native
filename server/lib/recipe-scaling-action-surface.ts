@@ -3,15 +3,14 @@ import { getRequestUserEmail, getThread } from "@agent-native/core/server";
 import { z } from "zod";
 
 import { resolveDocumentAccess } from "../../actions/_document-access.js";
+import { bindRecipeScalingGrant } from "./recipe-scaling-grants.js";
 export const RECIPE_SCALING_ACTION_NAME =
   "submit-recipe-scaling-result" as const;
 
 export const recipeScalingActionScopeSchema = z
   .object({
     kind: z.literal("sun-home-recipe-scaling"),
-    ownerEmail: z.string().email().max(320),
-    documentId: z.string().min(1).max(256),
-    factor: z.number().finite().positive(),
+    grantToken: z.string().min(40).max(100),
   })
   .strict();
 
@@ -23,6 +22,8 @@ type RecipeScalingSurfaceDetails = {
   ownerEmail: string | null;
   orgId?: string | null;
   threadId?: string;
+  requestedTurnId?: string;
+  queuedMessageId?: string;
   mode?: "act" | "plan";
   actionScope?: Readonly<Record<string, unknown>>;
   availableActionNames?: readonly string[];
@@ -55,8 +56,7 @@ export async function resolveRecipeScalingActionSurface(
   if (
     !details.ownerEmail ||
     !authenticatedUser ||
-    authenticatedUser.toLowerCase() !== details.ownerEmail.toLowerCase() ||
-    details.ownerEmail.toLowerCase() !== requested.ownerEmail.toLowerCase()
+    authenticatedUser.toLowerCase() !== details.ownerEmail.toLowerCase()
   ) {
     fail("This recipe scaling scope is unavailable", {
       statusCode: 404,
@@ -81,10 +81,18 @@ export async function resolveRecipeScalingActionSurface(
     });
   }
 
+  // The opaque token identifies only a SQL grant. Its owner and recipe data
+  // are loaded from the server-owned row, never from caller actionScope.
+  const grant = await bindRecipeScalingGrant(requested.grantToken, {
+    ownerEmail: details.ownerEmail,
+    threadId: thread.id,
+    turnId: details.requestedTurnId,
+    messageId: details.queuedMessageId,
+  });
+
   // Use Content's effective read authorization path, which includes the
   // Content-space authority fallback that generic Core access checks omit.
-  // A client-supplied ID never becomes authority by appearing in actionScope.
-  const document = await resolveDocumentAccess(requested.documentId);
+  const document = await resolveDocumentAccess(grant.documentId);
   if (!document || document.resource.trashedAt) {
     fail("The selected recipe is unavailable", {
       statusCode: 404,
@@ -106,8 +114,8 @@ export async function resolveRecipeScalingActionSurface(
   return {
     allowedActionNames: ["get-document", RECIPE_SCALING_ACTION_NAME],
     actionScope: {
-      ...requested,
-      ownerEmail: details.ownerEmail,
+      kind: "sun-home-recipe-scaling",
+      grantToken: requested.grantToken,
     } satisfies RecipeScalingActionScope,
   };
 }

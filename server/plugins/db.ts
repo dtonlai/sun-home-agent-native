@@ -1658,6 +1658,24 @@ export const runContentMigrations = runMigrations(
       name: "content-preview-draft-base-content-hash",
       sql: `ALTER TABLE document_preview_drafts ADD COLUMN IF NOT EXISTS base_content_hash TEXT`,
     },
+    {
+      version: 135,
+      name: "sun-home-recipe-scaling-grants",
+      sql: `CREATE TABLE IF NOT EXISTS recipe_scaling_grants (
+        token_hash TEXT PRIMARY KEY,
+        owner_email TEXT NOT NULL,
+        document_id TEXT NOT NULL,
+        factor TEXT NOT NULL,
+        expires_at TEXT NOT NULL,
+        bound_thread_id TEXT,
+        bound_turn_id TEXT,
+        bound_message_id TEXT,
+        consumed_at TEXT,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS recipe_scaling_grants_owner_expiry_idx
+        ON recipe_scaling_grants (owner_email, expires_at)`,
+    },
   ],
   { table: "content_migrations" },
 );

@@ -1,11 +1,16 @@
 import { fail, defineAction } from "@agent-native/core/action";
-import { getRequestRunContext } from "@agent-native/core/server";
+import {
+  getRequestRunContext,
+  getRequestUserEmail,
+} from "@agent-native/core/server";
 import { z } from "zod";
 
 import {
   recipeScalingActionScopeSchema,
   RECIPE_SCALING_ACTION_NAME,
 } from "../server/lib/recipe-scaling-action-surface.js";
+import { consumeRecipeScalingGrant } from "../server/lib/recipe-scaling-grants.js";
+import { resolveDocumentAccess } from "./_document-access.js";
 
 const recipeScalingResultSchema = z
   .object({
@@ -61,7 +66,9 @@ export default defineAction({
       !ctx.userEmail ||
       !parsedScope.success ||
       !run?.allowedActionNames?.includes(RECIPE_SCALING_ACTION_NAME) ||
-      parsedScope.data.ownerEmail.toLowerCase() !== ctx.userEmail.toLowerCase()
+      !run.threadId ||
+      run.threadId !== ctx.threadId ||
+      getRequestUserEmail()?.toLowerCase() !== ctx.userEmail.toLowerCase()
     ) {
       fail("This action requires an authorized recipe scaling turn", {
         statusCode: 403,
@@ -69,20 +76,21 @@ export default defineAction({
       });
     }
 
-    const scope = parsedScope.data;
-    if (
-      input.documentId !== scope.documentId ||
-      input.factor !== scope.factor
-    ) {
-      fail(
-        "The submitted result does not match the selected recipe and scale factor",
-        {
-          statusCode: 409,
-          errorCode: "recipe_scaling_result_mismatch",
-        },
-      );
+    const result = recipeScalingResultSchema.parse(input);
+    const document = await resolveDocumentAccess(result.documentId);
+    if (!document || document.resource.trashedAt) {
+      fail("The selected recipe is unavailable", {
+        statusCode: 404,
+        errorCode: "recipe_scaling_document_unavailable",
+      });
     }
-
-    return recipeScalingResultSchema.parse(input);
+    await consumeRecipeScalingGrant(parsedScope.data.grantToken, {
+      ownerEmail: ctx.userEmail,
+      documentId: result.documentId,
+      factor: result.factor,
+      threadId: run.threadId,
+      turnId: ctx.turnId,
+    });
+    return result;
   },
 });
