@@ -392,6 +392,16 @@ export default defineConfig({
   server: {
     allowedHosts: devAllowedHost ? [devAllowedHost] : [],
   },
+  ssr: {
+    noExternal: ["@agent-native/creative-context"],
+  },
+  environments: {
+    nitro: {
+      resolve: {
+        noExternal: ["@agent-native/creative-context"],
+      },
+    },
+  },
   plugins: [
     contentLocalComponentsPlugin(),
     ...reactRouterPlugins(),
