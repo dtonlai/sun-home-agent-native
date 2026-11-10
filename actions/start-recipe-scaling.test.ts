@@ -61,6 +61,14 @@ describe("start-recipe-scaling", () => {
   it("is not agent or MCP callable and rejects missing or inaccessible sources", async () => {
     expect(action.agentTool).toBe(false);
     expect(action.mcpTool).toBe(false);
+    expect(
+      action.schema.safeParse({ documentId: DOCUMENT_ID, factor: 0.001 })
+        .success,
+    ).toBe(true);
+    expect(
+      action.schema.safeParse({ documentId: DOCUMENT_ID, factor: 1000 })
+        .success,
+    ).toBe(true);
     await expect(
       runWithRequestContext({ userEmail: OWNER }, () =>
         action.run({ documentId: "missing", factor: 1 }, {

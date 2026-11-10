@@ -8,7 +8,7 @@ import { resolveDocumentAccess } from "./_document-access.js";
 const schema = z
   .object({
     documentId: z.string().trim().min(1).max(256),
-    factor: z.number().finite().min(0.01).max(100),
+    factor: z.number().finite().positive(),
   })
   .strict();
 

@@ -1,4 +1,5 @@
 import { createGetDb } from "@agent-native/core/db";
+import { registerIdentityColumns } from "@agent-native/core/org";
 import { registerSearchableResource } from "@agent-native/core/search";
 import { registerShareableResource } from "@agent-native/core/sharing";
 import { inArray } from "drizzle-orm";
@@ -11,6 +12,17 @@ import * as schema from "./schema.js";
 
 export const getDb = createGetDb(schema);
 export { schema };
+
+registerIdentityColumns([
+  {
+    table: "recipe_scaling_grants",
+    column: "owner_email",
+    emailChange: "rekey",
+    offboard: "delete",
+    reason:
+      "Scaling grants remain with the same account after an email change and are deleted on offboarding so they cannot transfer to a successor.",
+  },
+]);
 
 registerShareableResource({
   type: "document",

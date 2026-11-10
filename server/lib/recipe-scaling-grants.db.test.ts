@@ -4,7 +4,24 @@ import { join } from "node:path";
 
 import { runWithRequestContext } from "@agent-native/core/server";
 import { eq } from "drizzle-orm";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import {
+  afterAll,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
+
+const { identityColumnRegistration } = vi.hoisted(() => ({
+  identityColumnRegistration: vi.fn(),
+}));
+
+vi.mock("@agent-native/core/org", async (importOriginal) => ({
+  ...(await importOriginal()),
+  registerIdentityColumns: identityColumnRegistration,
+}));
 
 import {
   bindRecipeScalingGrant,
@@ -43,6 +60,16 @@ afterAll(() => rmSync(TEST_DB_PATH, { force: true, recursive: true }));
 
 describe("recipe scaling grant persistence", () => {
   it("stores only a hash and binds once to the same thread/turn/message", async () => {
+    expect(identityColumnRegistration).toHaveBeenCalledWith(
+      expect.arrayContaining([
+        expect.objectContaining({
+          table: "recipe_scaling_grants",
+          column: "owner_email",
+          emailChange: "rekey",
+          offboard: "delete",
+        }),
+      ]),
+    );
     const now = new Date();
     const grant = await createRecipeScalingGrant(
       { ownerEmail: OWNER, documentId: DOCUMENT_ID, factor: FACTOR },
