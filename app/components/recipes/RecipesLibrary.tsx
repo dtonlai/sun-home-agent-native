@@ -248,50 +248,24 @@ export function RecipesLibrary() {
     pageState !== null &&
     pageState.spaceId === activeSpace?.id &&
     pageState.pagination.hasMore;
-  const selectedSummary = recipeDocuments.find(
-    (document) => document.id === selectedRecipeId,
-  );
-
-  // A direct URL may point to a later page. Walk the action's explicit
-  // pagination until the ID is found or there are no more authorized pages.
-  useEffect(() => {
-    if (
-      !activeSpace ||
-      !selectedRecipeId ||
-      selectedSummary ||
-      !hasMore ||
-      documentsQuery.isFetching ||
-      documentsQuery.isError ||
-      pageState?.spaceId !== activeSpace.id
-    ) {
-      return;
-    }
-    const nextOffset = pageState.pagination.nextOffset;
-    if (nextOffset !== null && nextOffset !== pageOffset) {
-      setRequestedPage({ spaceId: activeSpace.id, offset: nextOffset });
-    }
-  }, [
-    activeSpace,
-    documentsQuery.isError,
-    documentsQuery.isFetching,
-    hasMore,
-    pageOffset,
-    pageState,
-    selectedRecipeId,
-    selectedSummary,
-  ]);
-
   const documentQuery = useActionQuery(
     "get-document",
-    selectedSummary ? { id: selectedSummary.id } : undefined,
+    selectedRecipeId ? { id: selectedRecipeId } : undefined,
     {
-      enabled: Boolean(selectedSummary),
+      enabled: Boolean(activeSpace && selectedRecipeId),
       queryKeyScope: viewerScope,
       staleTime: 0,
       refetchOnMount: "always",
       retry: false,
     },
   );
+  const selectedDocument =
+    documentQuery.data?.id === selectedRecipeId &&
+    documentQuery.data?.spaceId === activeSpace?.id &&
+    !documentQuery.data?.database &&
+    !documentQuery.data?.databaseMembership
+      ? documentQuery.data
+      : undefined;
   const listLoaded = pageState?.spaceId === activeSpace?.id;
   const nextOffset =
     listLoaded && hasMore ? (pageState?.pagination.nextOffset ?? null) : null;
@@ -480,22 +454,7 @@ export function RecipesLibrary() {
           aria-label={t("recipes.viewer")}
           className="min-w-0 rounded-lg border border-border bg-card p-4 sm:p-6"
         >
-          {selectedRecipeId && !selectedSummary && listError ? (
-            <PageError
-              description={listError}
-              onRetry={() => void documentsQuery.refetch()}
-              retrying={documentsQuery.isFetching}
-            />
-          ) : selectedRecipeId && !selectedSummary && hasMore ? (
-            <div aria-busy="true" className="space-y-4">
-              <Skeleton className="h-7 w-64" />
-              <Skeleton className="h-40 w-full" />
-            </div>
-          ) : selectedRecipeId && !selectedSummary && listLoaded ? (
-            <p role="status" className="text-sm text-muted-foreground">
-              {t("recipes.recipeUnavailable")}
-            </p>
-          ) : selectedSummary ? (
+          {selectedRecipeId ? (
             documentQuery.isLoading ? (
               <div aria-busy="true" className="space-y-4">
                 <Skeleton className="h-8 w-64" />
@@ -507,10 +466,10 @@ export function RecipesLibrary() {
                 onRetry={() => void documentQuery.refetch()}
                 retrying={documentQuery.isFetching}
               />
-            ) : documentQuery.data ? (
+            ) : selectedDocument ? (
               <RecipeDetails
-                document={documentQuery.data}
-                fallbackTitle={selectedSummary.title || t("recipes.untitled")}
+                document={selectedDocument}
+                fallbackTitle={selectedDocument.title || t("recipes.untitled")}
               />
             ) : (
               <p role="status" className="text-sm text-muted-foreground">

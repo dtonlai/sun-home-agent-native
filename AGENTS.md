@@ -62,6 +62,14 @@ Relevant installed skill guides may include `content`, `document-editing`, `acti
 
 ## Recipes v2.0 boundaries
 
+- For the read-only Recipes library workflow, locate the caller-authorized space
+  named exactly `Recipes` with `list-content-spaces`. Browse ordinary pages with
+  `list-documents` (`documentType: "page"`, following pagination on demand) and
+  read a selected page with `get-document` by its stable Content ID. Confirm
+  the returned document belongs to the selected Recipes space before showing
+  it. Use the Recipes route for navigation and retain the stable ID in its URL.
+  Keep these operations read-only; never create a Recipes space or create, move,
+  or edit Content automatically.
 - Recipes reads Content documents by stable identifiers. Changes to a source document must appear in Recipes; do not silently duplicate canonical recipe data.
 - Keep recipe parsing/template requirements minimal for the first proof of functionality. Use a representative sample recipe; defer a comprehensive schema.
 - Support 0.5×, 1×, 1.5×, 2×, and custom scaling. **Invoke the model only on an explicit Scale action.**

@@ -253,6 +253,7 @@ describe("Recipes library", () => {
     });
     fixture.document.data = {
       id: "recipe-stable-id",
+      spaceId: "caller-space-id",
       title: "Tomato Soup",
       content:
         "Servings: 4\n\n## Ingredients\n- 4 tomatoes\n\n## Method\nSimmer until tender.",
@@ -269,6 +270,69 @@ describe("Recipes library", () => {
     expect(fixture.documentCalls).toContainEqual({
       id: "recipe-stable-id",
     });
+  });
+
+  it("loads a deep-link recipe directly without scanning later list pages", () => {
+    fixture.search = "?spaceId=caller-space-id&recipeId=deep-linked-id";
+    fixture.spaces.data = {
+      spaces: [{ id: "caller-space-id", name: "Recipes", orgId: null }],
+    };
+    fixture.pages.set(0, {
+      data: {
+        documents: [{ id: "first-recipe", title: "First recipe" }],
+        pagination: { hasMore: true, nextOffset: 100 },
+      },
+      isLoading: false,
+      isError: false,
+      isFetching: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+    fixture.document.data = {
+      id: "deep-linked-id",
+      spaceId: "caller-space-id",
+      title: "Deep linked recipe",
+      content: "## Ingredients\n- Flour",
+    };
+
+    render(root);
+
+    expect(container.textContent).toContain("Deep linked recipe");
+    expect(fixture.documentCalls).toContainEqual({ id: "deep-linked-id" });
+    expect(fixture.listCalls.some(({ args }) => args.offset === 100)).toBe(
+      false,
+    );
+  });
+
+  it("does not render a selected document from outside the Recipes space", () => {
+    fixture.search = "?spaceId=caller-space-id&recipeId=private-document-id";
+    fixture.spaces.data = {
+      spaces: [{ id: "caller-space-id", name: "Recipes", orgId: null }],
+    };
+    fixture.pages.set(0, {
+      data: {
+        documents: [],
+        pagination: { hasMore: false, nextOffset: null },
+      },
+      isLoading: false,
+      isError: false,
+      isFetching: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+    fixture.document.data = {
+      id: "private-document-id",
+      spaceId: "another-space-id",
+      title: "Private page title",
+      content: "Private page body must not be shown.",
+    };
+
+    render(root);
+
+    expect(container.textContent).toContain("recipes.recipeUnavailable");
+    expect(container.textContent).not.toContain("Private page title");
+    expect(container.textContent).not.toContain("Private page body");
+    expect(fixture.documentCalls).toContainEqual({ id: "private-document-id" });
   });
 });
 
