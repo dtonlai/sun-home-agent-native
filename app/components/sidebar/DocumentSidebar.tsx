@@ -37,6 +37,7 @@ import {
   IconTrash,
   IconGitBranch,
   IconSearch,
+  IconToolsKitchen2,
 } from "@tabler/icons-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -3776,6 +3777,22 @@ export function DocumentSidebar({
         <div className="flex flex-col items-center gap-1 px-2 py-3">
           {renderCollapsedNewButton()}
           {collapsedSearchButton}
+          <Link
+            to="/recipes"
+            aria-label={t("recipes.title")}
+            aria-current={
+              location.pathname.startsWith("/recipes") ? "page" : undefined
+            }
+            title={t("recipes.title")}
+            onClick={onNavigate}
+            className={cn(
+              "flex size-9 items-center justify-center rounded text-muted-foreground hover:bg-sidebar-accent/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+              location.pathname.startsWith("/recipes") &&
+                "bg-sidebar-accent text-sidebar-accent-foreground",
+            )}
+          >
+            <IconToolsKitchen2 className="size-4" aria-hidden="true" />
+          </Link>
         </div>
         <div className="mt-auto shrink-0 w-full">
           <AppSidebarFooter
@@ -3821,6 +3838,27 @@ export function DocumentSidebar({
       />
       {contentSpaceSelector}
       <div className="shrink-0 ps-2 pe-2 py-2">{searchButton}</div>
+      <div className="shrink-0 px-2 pb-1">
+        <Link
+          to="/recipes"
+          aria-current={
+            location.pathname.startsWith("/recipes") ? "page" : undefined
+          }
+          className={cn(
+            sidebarRowClassName(location.pathname.startsWith("/recipes")),
+            "ms-1",
+          )}
+          onClick={onNavigate}
+        >
+          <span className="flex size-7 shrink-0 items-center justify-center">
+            <IconToolsKitchen2
+              className="size-4 text-muted-foreground"
+              aria-hidden="true"
+            />
+          </span>
+          <span className="truncate">{t("recipes.title")}</span>
+        </Link>
+      </div>
 
       <SidebarPageActionsProvider value={sidebarPageActions}>
         <ScrollArea className="min-h-0 flex-1 [&_[data-radix-scroll-area-viewport]]:!overflow-x-hidden">

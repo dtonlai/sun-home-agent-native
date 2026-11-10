@@ -18,6 +18,13 @@ export function navigationStateForLocation({
 }): NavigationState {
   if (pathname === "/home" || pathname === "") return { view: "list" };
   if (pathname.startsWith("/local-files")) return { view: "local-files" };
+  if (/^\/recipes\/?$/.test(pathname)) {
+    const documentId = searchParams.get("recipeId")?.trim();
+    return {
+      view: "recipes",
+      ...(documentId ? { documentId } : {}),
+    };
+  }
 
   const pageMatch = pathname.match(/^\/page\/(.+)/);
   const directMatch = pathname.match(/^\/([a-f0-9]+)$/);
