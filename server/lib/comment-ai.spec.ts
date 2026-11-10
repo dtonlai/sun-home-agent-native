@@ -99,7 +99,7 @@ afterAll(() => {
 });
 
 describe("comment AI request persistence", () => {
-  it("keeps recipe result validation out of ordinary chat and preserves both comment-AI scopes", async () => {
+  it("preserves default chat resolution and both comment-AI scopes", async () => {
     const ordinary = await commentAi.resolveCommentAiActionSurface({
       ownerEmail: OWNER,
       availableActionNames: [

@@ -3,8 +3,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { getDbExec } from "@agent-native/core/db";
-import { runWithRequestContext } from "@agent-native/core/server";
-import { createThread } from "@agent-native/core/server";
+import {
+  createThread,
+  getThread,
+  runWithRequestContext,
+} from "@agent-native/core/server";
 import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
@@ -129,6 +132,40 @@ describe("recipe scaling action surface", () => {
       actionScope: {
         kind: "sun-home-recipe-scaling",
         ownerEmail: OWNER,
+        documentId: DOCUMENT_ID,
+        factor: FACTOR,
+      },
+    });
+  });
+
+  it("documents that a caller-supplied scope can authorize an ordinary owned thread", async () => {
+    const surface = await asUser(OWNER, async () => {
+      const thread = await getThread(THREAD_ID);
+      expect(thread?.scope).toBeNull();
+      return resolveSurface({
+        ownerEmail: OWNER,
+        threadId: THREAD_ID,
+        mode: "act",
+        // Core 0.226.0 passes this request-body field to the app resolver;
+        // there is no server-created Scale-turn state in this contract yet.
+        actionScope: {
+          kind: "sun-home-recipe-scaling",
+          ownerEmail: OWNER,
+          documentId: DOCUMENT_ID,
+          factor: FACTOR,
+        },
+        availableActionNames: [
+          "get-document",
+          "submit-recipe-scaling-result",
+          "update-document",
+        ],
+      });
+    });
+
+    expect(surface).toMatchObject({
+      allowedActionNames: ["get-document", "submit-recipe-scaling-result"],
+      actionScope: {
+        kind: "sun-home-recipe-scaling",
         documentId: DOCUMENT_ID,
         factor: FACTOR,
       },

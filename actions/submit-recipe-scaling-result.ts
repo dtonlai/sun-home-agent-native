@@ -45,7 +45,7 @@ const recipeScalingResultSchema = z
 
 export default defineAction({
   description:
-    "Submit a validated scaled recipe for the currently authorized source document and factor. Available only during a Sun Home recipe scaling turn; this action validates and returns data without calling a model or changing Content.",
+    "Submit a validated scaled recipe matching the active Sun Home recipe scaling scope's source document and factor. This action validates and returns data without calling a model or changing Content.",
   schema: recipeScalingResultSchema,
   outputSchema: recipeScalingResultSchema,
   http: false,

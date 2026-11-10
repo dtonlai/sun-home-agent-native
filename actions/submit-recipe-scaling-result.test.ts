@@ -64,7 +64,7 @@ describe("submit-recipe-scaling-result", () => {
     }
   });
 
-  it("rejects ordinary chat and a different signed-in caller", async () => {
+  it("rejects a tool run without scope and a different signed-in caller", async () => {
     await expect(
       runWithRequestContext({ userEmail: OWNER }, () =>
         action.run(INPUT, { caller: "tool", userEmail: OWNER } as never),
