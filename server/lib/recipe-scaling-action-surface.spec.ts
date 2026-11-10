@@ -3,7 +3,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { getDbExec } from "@agent-native/core/db";
-import { createThread, runWithRequestContext } from "@agent-native/core/server";
+import {
+  createThread,
+  getThread,
+  runWithRequestContext,
+} from "@agent-native/core/server";
 import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
@@ -141,6 +145,9 @@ describe("recipe scaling action surface", () => {
   });
 
   it("rejects caller-minted scopes and binds a valid grant once to thread and available turn/message IDs", async () => {
+    await asUser(OWNER, async () => {
+      expect((await getThread(THREAD_ID))?.scope).toBeNull();
+    });
     await expect(
       asUser(OWNER, () =>
         resolveSurface(
