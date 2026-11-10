@@ -8,7 +8,7 @@ Sun Home v2 is a standalone Agent Native application built around upstream **Con
 2. Read the assigned task (use JSM HQ `get_my_task` when available).
 3. Read relevant sections of `docs/project.md` (charter, scope, constraints) and `docs/plan.md` (phases, ownership, exit gates). Do not assume headings or section numbers from another project.
 4. Read the generated Agent Native guidance and the exact relevant `.agents/skills/**/SKILL.md` before changing framework behavior. Confirm that files, actions, and scripts exist in this checkout.
-5. For framework-specific questions, use the bundled documentation first: `pnpm action docs-search --query "<topic>"` or `pnpm action docs-search --slug "<slug>"` **if available**. Inspect installed package source and official docs as needed; document the version and evidence behind a fix.
+5. For non-trivial framework behavior, use version-matched documentation and source from the installed `@agent-native/core` first. Use `pnpm action framework-search --pattern "<topic>"` **if available**, then focused `docs-search` / `source-search` readers; otherwise inspect `node_modules/@agent-native/core/docs` and package source directly. Confirm scripts and files exist before relying on them. Public official docs can supplement installed evidence; record the framework version and evidence behind a fix.
 
 If these sources conflict, do not silently reconcile them. Raise the conflict to Michael; changes to product scope or approval boundaries require the product owner's decision. Preserve generated Content instructions when they govern Content behavior.
 
@@ -49,7 +49,7 @@ Do not assume that JSM HQ, GitHub PRs, CodeRabbit, or particular status commands
 The following rules are inherited from Content's original agent guide. They apply when the relevant Content actions/features are present; check action schemas rather than guessing.
 
 - **Use Content actions for document operations.** Call registered actions directly; `ask_app` delegates to Content's agent. Do not bypass authorization with raw SQL or ad hoc HTTP mutations.
-- **Preserve user-authored content.** Live Yjs body writes use supported actions. External agents use revision-aware `edit-document`; use `initializeContent` only for an empty body. Browser full rewrites use `update-document` only where appropriate. Prefer targeted edits.
+- **Preserve user-authored content.** Read the current document with `pull-document` or `get-document` before editing. Live Yjs body writes use supported actions. External agents use revision-aware `edit-document`; use `initializeContent` only when `get-document` confirms the body is literally empty, passing its returned `baseRevision` and a stable `idempotencyKey`. Browser full rewrites use `update-document` only where appropriate. Prefer targeted edits.
 - **Use current state, not guessed IDs.** Inspect `<current-screen>` when provided; use `view-screen` to refresh stale context and `navigate` for navigation. `navigation` is UI-owned: do not write it directly. Use `refresh-list` only when an out-of-band mutation leaves the UI stale.
 - **Privacy is the default.** Documents are private unless shared through supported sharing actions. Two Google logins do not automatically imply access to the same library; test sharing/authorization explicitly.
 - **Avoid destructive Content operations.** Trash is not permanent deletion. Permanent purge requires the supported frozen plan and documented authorization flow. Do not treat navigation, trash filters, or import progress as deletion authority.

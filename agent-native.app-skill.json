@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "id": "sun-home-agent-native",
+  "displayName": "Sun Home Agent Native",
+  "description": "Local standalone Sun Home v2 app. Content-backed household documents are the foundation for a Recipes module. No hosted Sun Home endpoint is configured.",
+  "hosted": {
+    "url": "http://127.0.0.1:8083",
+    "mcpUrl": "http://127.0.0.1:8083/_agent-native/mcp"
+  },
+  "mcp": {
+    "serverName": "sun-home-agent-native"
+  },
+  "local": {
+    "sourcePath": ".",
+    "defaultUrl": "http://127.0.0.1:8083",
+    "commands": {
+      "install": "pnpm install",
+      "dev": "pnpm dev",
+      "start": "pnpm start"
+    }
+  },
+  "surfaces": [
+    {
+      "id": "sun-home-documents",
+      "action": "list-documents",
+      "path": "/"
+    },
+    {
+      "id": "sun-home-local-files",
+      "action": "share-local-file-document",
+      "path": "/local-files"
+    }
+  ],
+  "skills": [
+    {
+      "path": ".agents/skills/creative-context",
+      "visibility": "internal"
+    },
+    {
+      "path": ".agents/skills/content",
+      "visibility": "internal"
+    },
+    {
+      "path": ".agents/skills/document-editing",
+      "visibility": "internal"
+    }
+  ],
+  "hostAdapters": [
+    "plain-skill"
+  ]
+}
