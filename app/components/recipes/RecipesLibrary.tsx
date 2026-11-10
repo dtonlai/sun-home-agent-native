@@ -1,5 +1,7 @@
+import { sendToAgentChat } from "@agent-native/core/client/agent-chat";
 import {
   actionErrorMessage,
+  useActionMutation,
   useActionQuery,
   useSession,
 } from "@agent-native/core/client/hooks";
@@ -13,7 +15,10 @@ import { QueryErrorState } from "@/components/QueryErrorState";
 import { parseRecipeContent } from "@/components/recipes/recipe-content";
 import { RecipeMarkdown } from "@/components/recipes/RecipeMarkdown";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
+import "@/components/recipes/RecipeScalingResult";
 
 type RecipeListItem = {
   id: string;
@@ -70,11 +75,44 @@ function RecipeDetails({
   fallbackTitle: string;
 }) {
   const t = useT();
+  const scaleMutation = useActionMutation("start-recipe-scaling");
+  const [scaleChoice, setScaleChoice] = useState("2");
+  const [customFactor, setCustomFactor] = useState("");
+  const [scaleError, setScaleError] = useState<string | null>(null);
+  const customFactorNumber = Number(customFactor);
+  const factor =
+    scaleChoice === "custom"
+      ? Number.isFinite(customFactorNumber) && customFactorNumber > 0
+        ? customFactorNumber
+        : null
+      : Number(scaleChoice);
   const content = parseRecipeContent(document.content ?? "");
   const title = document.title?.trim() || fallbackTitle;
   const hasBody = Boolean(
     content.ingredients || content.instructions || content.additional,
   );
+  const requestScaling = async () => {
+    if (factor === null || !Number.isFinite(factor) || factor <= 0) return;
+    setScaleError(null);
+    try {
+      const grant = await scaleMutation.mutateAsync({
+        documentId: document.id,
+        factor,
+      });
+      sendToAgentChat({
+        message: t("recipes.scalingRequest", { factor: String(factor) }),
+        context: JSON.stringify({ documentId: document.id, factor }),
+        actionScope: {
+          kind: "sun-home-recipe-scaling",
+          grantToken: grant.grantToken,
+        },
+        submit: true,
+        openSidebar: true,
+      });
+    } catch (error) {
+      setScaleError(actionErrorMessage(error) ?? t("recipes.scalingError"));
+    }
+  };
 
   return (
     <article className="min-w-0">
@@ -97,6 +135,75 @@ function RecipeDetails({
             {t("recipes.openInContent")}
           </Link>
         </Button>
+      </div>
+
+      <div className="mt-4 flex flex-wrap items-end gap-3">
+        <div className="grid gap-1.5">
+          <Label htmlFor="recipe-scale-choice">
+            {t("recipes.scaleFactor")}
+          </Label>
+          <select
+            id="recipe-scale-choice"
+            aria-label={t("recipes.scaleFactor")}
+            className="h-9 rounded-md border border-input bg-background px-3 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            value={scaleChoice}
+            onChange={(event) => {
+              setScaleChoice(event.currentTarget.value);
+              setScaleError(null);
+            }}
+          >
+            <option value="0.5">0.5×</option>
+            <option value="1">1×</option>
+            <option value="1.5">1.5×</option>
+            <option value="2">2×</option>
+            <option value="custom">{t("recipes.customScale")}</option>
+          </select>
+        </div>
+        {scaleChoice === "custom" ? (
+          <div className="grid gap-1.5">
+            <Label htmlFor="recipe-custom-scale">
+              {t("recipes.customScaleFactor")}
+            </Label>
+            <Input
+              id="recipe-custom-scale"
+              aria-label={t("recipes.customScaleFactor")}
+              aria-invalid={factor === null}
+              aria-describedby="recipe-custom-scale-help"
+              type="number"
+              min="0"
+              step="any"
+              inputMode="decimal"
+              value={customFactor}
+              onChange={(event) => {
+                setCustomFactor(event.currentTarget.value);
+                setScaleError(null);
+              }}
+              className="w-32"
+            />
+            <p
+              id="recipe-custom-scale-help"
+              className="text-xs text-muted-foreground"
+            >
+              {factor === null
+                ? t("recipes.customScaleInvalid")
+                : t("recipes.customScaleHelp")}
+            </p>
+          </div>
+        ) : null}
+        <Button
+          type="button"
+          onClick={() => void requestScaling()}
+          disabled={scaleMutation.isPending || factor === null}
+        >
+          {scaleMutation.isPending
+            ? t("recipes.scalingPending")
+            : t("recipes.scale")}
+        </Button>
+        {scaleError ? (
+          <p role="alert" className="w-full text-sm text-destructive">
+            {scaleError}
+          </p>
+        ) : null}
       </div>
 
       {hasBody ? (
