@@ -157,15 +157,13 @@ indicates the resolved SSR environment should include
 `@agent-native/creative-context`; the previous run did not capture the final
 runtime environment object, so this is not a runtime dump.
 
-The remaining contradiction is that Node handled the package import even
-though Core's configuration construction includes it in `noExternal`. Source
-inspection identifies no supported config change that explains or fixes this
-specific run. The smallest next diagnostic is to inspect the live
-`server.environments.ssr.config.resolve.noExternal` and Vite runner's
-externalization result in one approved dev run. Until that confirms whether
-the option was lost during environment resolution or a different loader path
-was used, keep the implementation unchanged; no package patch or extra SSR
-override is justified by the evidence so far.
+The remaining contradiction at the time of this source-only note was that
+Node handled the package import even though Core's config construction
+included it in `noExternal`. The proposed next diagnostic was to inspect the
+live `server.environments.ssr.config.resolve.noExternal` and Vite runner's
+externalization result in one approved dev run. That diagnostic and the
+approved Nitro-environment change are recorded below; this earlier proposal
+is retained as investigation history.
 
 ## P1P-T04 targeted debug run
 
@@ -209,8 +207,32 @@ on a different environment from the failing route's loader.
 
 Stopped the dev process immediately after the request; process and port
 checks afterward were empty. Watcher-limit polling fallbacks appeared during
-startup. No config, package, dependency, OS, or sandbox changes were made. The
-smallest next-step proposal for review is to determine whether the installed
-Core/Nitro integration supports adding this package to the `nitro`
-environment's `resolve.noExternal`, then test only after explicit approval;
-do not treat this diagnostic as authorization to implement that change.
+startup. No config, package, dependency, OS, or sandbox changes were made in
+that diagnostic. At that point, the next-step proposal was to review whether
+the installed Core/Nitro integration supports adding this package to the
+`nitro` environment's `resolve.noExternal`. Michael's approval and the
+follow-up implementation/verification are recorded below.
+
+## P1P-T04 approved Nitro-environment fix
+
+Following Michael's approval, `vite.config.ts` now keeps the package in
+`ssr.noExternal` and also adds it to
+`environments.nitro.resolve.noExternal`, using Vite 8.1.0's documented
+environment options shape. No package, dependency, shim, or override changed.
+
+Before verification, no app server was running. Resources: 10 processors;
+load `0.10, 0.30, 0.28`; 7.9 GiB memory total with 6.5 GiB available; 4.8 GB
+free disk; inotify watches/instances/queue `65194/128/16384`; file descriptor
+limit `1048576`.
+
+Ran `pnpm build` (exit 0; `Build complete.`). Doctor reported 148 findings
+and the build printed watcher-limit fallback warnings; the build completed.
+
+Started one `pnpm dev` session (Vite 8.1.0, ready in 3511 ms), then issued one
+curl GET to `/settings`. Result: HTTP 200, `text/html; charset=utf-8`, 371,958
+bytes, 21.847513 seconds. The response body is the rendered application page.
+The server log contains no `SSR error`, `ERR_MODULE_NOT_FOUND`,
+`CreativeContextPanel`, or `AgentMark` error. Watcher-limit polling fallbacks
+still appeared during startup. Stopped the server immediately after the
+request; process and port checks were empty afterward. No OS or sandbox
+settings were changed.

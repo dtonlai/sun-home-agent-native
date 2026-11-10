@@ -395,6 +395,13 @@ export default defineConfig({
   ssr: {
     noExternal: ["@agent-native/creative-context"],
   },
+  environments: {
+    nitro: {
+      resolve: {
+        noExternal: ["@agent-native/creative-context"],
+      },
+    },
+  },
   plugins: [
     contentLocalComponentsPlugin(),
     ...reactRouterPlugins(),
