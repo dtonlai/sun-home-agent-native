@@ -56,12 +56,70 @@ The package-level Node import reproduces without choosing an app route. The
 exact route or action that triggered the user's runtime error was not provided,
 so its UI entry point is not independently confirmed.
 
-## Recommendation
+## P1P-T04: reviewed Vite SSR option
 
-Escalate this to the `@agent-native/creative-context` maintainers as a
-publication defect. The smallest upstream correction is to emit a Node-valid
-relative specifier such as `./AgentMark.js` (or bundle the component), with a
-regression check that imports `@agent-native/creative-context/client` under
-native Node ESM. The registry still reports 0.8.68 as latest. Do not add an
-application patch or SSR override based on this investigation alone; provide
-the exact route and action if the user wants the app-level trigger mapped too.
+The approved app-owned change adds only
+`ssr.noExternal: ["@agent-native/creative-context"]` to `vite.config.ts`.
+Vite 8.1.0's [SSR options documentation](https://vite.dev/config/ssr-options.html)
+defines `ssr.noExternal` as preventing listed dependencies from being
+externalized for SSR, and says they are bundled in build. Installed Core
+0.226.0's Vite plugin also appends `userConfig.ssr.noExternal` to its dev SSR
+dependency list (`node_modules/@agent-native/core/dist/vite/client.js`).
+
+### Production build
+
+Ran `pnpm build` (exit 0; output: `Build complete.`). It emitted bundled
+`AgentMark` assets for both client and server:
+
+```text
+build/client/assets/AgentMark-tThENsj2.js
+build/server/assets/AgentMark-B9KjQsBs.js
+```
+
+The build also printed the existing template doctor findings and missing
+production-only auth/database environment diagnostics; no credentials were
+added.
+
+### Single local development request
+
+Before build, at `2026-11-10T20:08:20Z`, observed 10 processors, load average
+`0.00, 0.05, 0.07`, 7.9 GiB memory total with 7.4 GiB available, 7.9 GB free
+workspace disk, `max_user_watches=65194`, `max_user_instances=128`,
+`max_queued_events=16384`, and `ulimit -n=1048576`. No app server was running.
+
+Ran one documented dev session, with output captured to `/tmp/p1p-t04-dev.log`:
+
+```sh
+pnpm dev
+```
+
+Vite 8.1.0 became ready in 3286 ms and printed
+`http://localhost:8080/`. Requested `/settings`, whose route imports
+`@agent-native/creative-context/client`:
+
+```sh
+curl --max-time 30 -sS -D /tmp/p1p-t04-settings.headers \
+  -o /tmp/p1p-t04-settings.html \
+  -w 'HTTP %{http_code}; content-type %{content_type}; bytes %{size_download}; time %{time_total}s\n' \
+  http://localhost:8080/settings
+```
+
+Result: HTTP 500, `text/plain`, 577 bytes, 6.944046 seconds. The body and
+server log still contain the same `ERR_MODULE_NOT_FOUND` for
+`dist/client/AgentMark` imported by `CreativeContextPanel.js`. Startup also
+logged watcher-limit fallbacks to polling, but the server started and this
+request's failure was the same module-resolution error.
+
+Stopped the server with Ctrl+C after the request. Follow-up process and port
+checks were empty. No OS watcher limits, sandbox settings, package files, or
+dependencies were changed.
+
+## Recommendation and remaining limit
+
+The approved option fixes the production bundle but did not fix the dev SSR
+request, despite the installed Core dev hook including the user option. No
+second dev run or additional workaround was attempted. Ask the lead to review
+why this runtime still loads the external package directly before changing
+configuration further. The exact route/action from the original user report
+remains unknown; `/settings` independently confirms the issue on a route that
+imports the package.
