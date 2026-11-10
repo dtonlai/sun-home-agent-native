@@ -16,7 +16,7 @@ const INPUT = {
   documentId: DOCUMENT_ID,
   factor: FACTOR,
   recipe: {
-    servings: 6,
+    servings: "6",
     ingredientLines: ["  1½ cups flour  "],
     instructions: ["  Mix and bake.  "],
     adjustmentExplanations: ["  Bake time remains unchanged.  "],
@@ -50,6 +50,18 @@ describe("submit-recipe-scaling-result", () => {
         adjustmentExplanations: ["Bake time remains unchanged."],
       },
     });
+  });
+
+  it("preserves fractional, range, and absent serving descriptions as text", async () => {
+    for (const servings of ["1.5", "1½–2", null]) {
+      const result = await asScalingTool(() =>
+        action.run({ ...INPUT, recipe: { ...INPUT.recipe, servings } }, {
+          caller: "tool",
+          userEmail: OWNER,
+        } as never),
+      );
+      expect(result.recipe.servings).toBe(servings);
+    }
   });
 
   it("rejects ordinary chat and a different signed-in caller", async () => {
@@ -95,7 +107,13 @@ describe("submit-recipe-scaling-result", () => {
     expect(
       action.schema.safeParse({
         ...INPUT,
-        recipe: { ...INPUT.recipe, servings: 0 },
+        recipe: { ...INPUT.recipe, servings: 6 },
+      }).success,
+    ).toBe(false);
+    expect(
+      action.schema.safeParse({
+        ...INPUT,
+        recipe: { ...INPUT.recipe, servings: "s".repeat(81) },
       }).success,
     ).toBe(false);
     expect(

@@ -13,7 +13,7 @@ const recipeScalingResultSchema = z
     factor: z.number().finite().positive(),
     recipe: z
       .object({
-        servings: z.number().int().min(1).max(10_000),
+        servings: z.string().trim().max(80).nullable(),
         ingredientLines: z
           .array(z.string().trim().min(1).max(300))
           .min(1)

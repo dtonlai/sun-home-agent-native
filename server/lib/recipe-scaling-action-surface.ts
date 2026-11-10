@@ -1,8 +1,8 @@
 import { fail } from "@agent-native/core/action";
 import { getRequestUserEmail, getThread } from "@agent-native/core/server";
-import { assertAccess } from "@agent-native/core/sharing";
 import { z } from "zod";
 
+import { resolveDocumentAccess } from "../../actions/_document-access.js";
 export const RECIPE_SCALING_ACTION_NAME =
   "submit-recipe-scaling-result" as const;
 
@@ -81,13 +81,16 @@ export async function resolveRecipeScalingActionSurface(
     });
   }
 
-  // Resolve Content access with the signed-in request identity. This is the
-  // same Core sharing boundary used by app actions; a client-supplied ID never
-  // becomes authority by appearing in actionScope.
-  await assertAccess("document", requested.documentId, "viewer", {
-    userEmail: details.ownerEmail,
-    ...(details.orgId ? { orgId: details.orgId } : {}),
-  });
+  // Use Content's effective read authorization path, which includes the
+  // Content-space authority fallback that generic Core access checks omit.
+  // A client-supplied ID never becomes authority by appearing in actionScope.
+  const document = await resolveDocumentAccess(requested.documentId);
+  if (!document || document.resource.trashedAt) {
+    fail("The selected recipe is unavailable", {
+      statusCode: 404,
+      errorCode: "recipe_scaling_document_unavailable",
+    });
+  }
 
   const available = new Set(details.availableActionNames ?? []);
   if (
