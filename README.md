@@ -1,34 +1,30 @@
-# Content
+# Sun Home Agent Native
 
-Open-source Obsidian for MDX — an agent-native, local-file document workspace and
-a self-hostable alternative to Notion and Obsidian. Edit local Markdown/MDX files,
-build Notion-style collections, and write with an AI agent.
+Sun Home v2 is a standalone Agent Native app for household knowledge and
+recipes. This repository is already the app root; clone it and run the app
+directly. Do not scaffold a separate Content app.
 
-**Live app: [content.agent-native.com](https://content.agent-native.com?utm_source=github&utm_medium=referral&utm_content=content-readme)**
+The current foundation uses Agent Native's upstream Content template for
+documents and collections. The planned Recipes experience will read recipe
+documents from Content and add agent-assisted scaling without replacing the
+original recipe.
 
-Open a doc and ask "rewrite this paragraph to be more concise" or "create a page
-called Q4 Planning with sub-pages for Goals, Metrics, and Risks" — the same result
-whether you do it yourself or ask. Documents can live in your SQL database or as
-local Markdown/MDX files.
+## Run locally
 
-## Features
-
-- Rich-text editor (Tiptap) with slash commands and hierarchical pages.
-- Notion-style collections with table, board, calendar, gallery, and timeline views.
-- Local Markdown/MDX file editing plus custom interactive MDX components.
-- Inline comments, version history, and full-text search.
-- Private-by-default sharing with per-user / per-org grants and public pages.
-- Optional Notion and Builder.io sync.
-
-## Develop locally
-
-Scaffold your own copy and run it:
+Requirements: Node.js 22.22 or later and Git. Corepack enables the pnpm version
+pinned by this repository.
 
 ```bash
-npx --yes @agent-native/core@latest create my-content --standalone --template content
-cd my-content
+git clone https://github.com/dtonlai/sun-home-agent-native.git
+cd sun-home-agent-native
+corepack enable
 pnpm install
 pnpm dev
 ```
 
-Full docs: [agent-native.com/docs/template-content](https://agent-native.com/docs/template-content?utm_source=github&utm_medium=referral&utm_content=content-readme).
+Open the local URL printed by `pnpm dev`. On the Welcome screen, choose
+**Continue as local dev**. No provider key is needed to start the app; connect a
+model separately to use agent responses.
+
+For framework and Content behavior, use the version-matched guidance in
+`.agents/skills/` and the [Agent Native Content developer guide](https://www.agent-native.com/docs/template-content-developers/).
