@@ -80,6 +80,7 @@ Relevant installed skill guides may include `content`, `document-editing`, `acti
   scaled copy to Content. The result action renders an ephemeral comparison.
 - Recipes reads Content documents by stable identifiers. Changes to a source document must appear in Recipes; do not silently duplicate canonical recipe data.
 - Keep recipe parsing/template requirements minimal for the first proof of functionality. Use a representative sample recipe; defer a comprehensive schema.
+- For explicit local Recipes viewer validation, `pnpm seed:test-recipes` invokes a CLI-only approved seed action. It requires interactive confirmation, targets local PGlite only, creates/reuses the exact `Recipes` space and marked sample pages, skips existing titles, and never overwrites or deletes documents. It is never run automatically by the agent and must not be used against remote databases.
 - Support 0.5×, 1×, 1.5×, 2×, and custom scaling. **Invoke the model only on an explicit Scale action.**
 - Use the Agent Native agent and **OpenRouter** (prefer a compatible cost-effective DeepSeek model). Verify tool calling, structured output, and any needed streaming behavior against the selected model.
 - Scaling must account for non-linear cooking factors such as oven temperature, time, seasoning, equipment capacity, and batching. Validate returned data; show useful errors.

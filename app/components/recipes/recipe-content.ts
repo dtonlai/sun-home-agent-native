@@ -28,8 +28,10 @@ function heading(line: string): { section: Section; value: string } | null {
   const label = match[1].toLocaleLowerCase();
   if (/^servings?$|^serving size$|^yield$|^makes$|^serves$/.test(label))
     return null;
-  if (/^ingredients?$|^what you'll need$|^components?$/.test(label))
+  if (/^ingredients?$|^what you'll need$/.test(label))
     return { section: "ingredients", value: match[2] };
+  if (/^components?$/.test(label))
+    return { section: "additional", value: match[2] };
   if (
     /^instructions?$|^directions?$|^method$|^steps?$|^preparation$/.test(label)
   )
@@ -104,10 +106,23 @@ export function parseRecipeContent(content: string): ParsedRecipeContent {
     }
     if ((current === "ingredients" || current === "instructions") && trimmed) {
       const markdownGroup = trimmed.match(/^#{2,6}\s+(.+?)\s*#*$/);
+      let nextLine = i + 1;
+      while (nextLine < lines.length && !lines[nextLine].trim()) nextLine++;
+      const nextText = lines[nextLine]?.trim() ?? "";
+      const standaloneLabel =
+        /^[A-Z][\p{L}\p{N}'’&/()+ -]{0,58}[\p{L}\p{N})]$/u.test(trimmed) &&
+        !/[.!?,;]$/.test(trimmed) &&
+        Boolean(nextText) &&
+        (current === "ingredients"
+          ? /^[-*+]\s|^\d+(?:[.)]|\s)/.test(nextText)
+          : components.some(
+              (component) => normalize(component.name) === normalize(trimmed),
+            ));
       const componentMatch =
         markdownGroup ??
         trimmed.match(/^\*\*(.+?)\*\*\s*:?\s*$/) ??
-        trimmed.match(/^([^:#][^:]*):\s*$/);
+        trimmed.match(/^([^:#][^:]*):\s*$/) ??
+        (standaloneLabel ? [trimmed, trimmed] : null);
       if (componentMatch) {
         const name = componentMatch[1].trim();
         if (name && !heading(name)) {

@@ -9,15 +9,18 @@ Serving Size
 2-3 servings
 
 Components
-Sauce:
+Sauce + Stir Fry
+
+Ingredients
+Sauce
 - 2 tbsp soy sauce
-Stir Fry:
+Stir Fry
 - noodles
 
 Instructions
-Sauce:
+Sauce
 Mix sauce.
-Stir Fry:
+Stir Fry
 Cook in a hot wok.
 
 Source: Family notes
@@ -37,6 +40,7 @@ Related links: [Technique](https://example.com)`);
       },
     ]);
     expect(parsed.additional).toContain("Source: Family notes");
+    expect(parsed.additional).toContain("Sauce + Stir Fry");
     expect(parsed.additional).toContain("Related links:");
   });
 
@@ -44,17 +48,20 @@ Related links: [Technique](https://example.com)`);
     const parsed = parseRecipeContent(`Beef Chow Fun — Cantonese
 Serving Size: 4-5 people
 
+Components
+Beef + Marinade
+
 ## Ingredients
-### Beef
+Beef
 - 1 lb flank steak
-### Beef Marinade
+Beef Marinade
 - beef
 - soy sauce
 
 ## Instructions
-### Beef
+Beef
 Slice the beef thinly.
-### Beef Marinade
+Beef Marinade
 Marinate the beef.
 
 Source: Cookbook`);
@@ -74,7 +81,7 @@ Source: Cookbook`);
     ]);
     expect(parsed.instructions).toBe("");
     expect(parsed.additional).toBe(
-      "Beef Chow Fun — Cantonese\nSource: Cookbook",
+      "Beef Chow Fun — Cantonese\nComponents\nBeef + Marinade\nSource: Cookbook",
     );
   });
 
