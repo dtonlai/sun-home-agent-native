@@ -67,8 +67,13 @@ Relevant installed skill guides may include `content`, `document-editing`, `acti
   named exactly `Recipes` with `list-content-spaces`. Browse ordinary pages with
   `list-documents` (`documentType: "page"`, following pagination on demand) and
   read a selected page with `get-document` by its stable Content ID. Confirm
-  the returned document belongs to the selected Recipes space before showing
-  it. Use the Recipes route for navigation and retain the stable ID in its URL.
+  the returned document's `id` and `spaceId` match the selected recipe and
+  authorized Recipes space before showing it. The document must not be a
+  collection document (`database` is absent), and it may have no
+  `databaseMembership` or only the system Files membership
+  (`databaseMembership.systemRole === "files"`); reject ordinary collection-row
+  memberships. Use the Recipes route for navigation and retain the stable ID in
+  its URL.
   Keep these operations read-only; never create a Recipes space or create, move,
   or edit Content automatically.
 - For explicit scaling, the Recipes UI alone calls `start-recipe-scaling` after

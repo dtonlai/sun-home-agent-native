@@ -1,6 +1,65 @@
 import { describe, expect, it } from "vitest";
 
-import { parseRecipeContent } from "./recipe-content";
+import {
+  isRecipeDocumentSelection,
+  parseRecipeContent,
+} from "./recipe-content";
+
+describe("isRecipeDocumentSelection", () => {
+  const matchingPage = {
+    id: "recipe-1",
+    spaceId: "recipes-space",
+  };
+
+  it("accepts the matching page with no membership or only the system Files membership", () => {
+    expect(
+      isRecipeDocumentSelection(matchingPage, "recipe-1", "recipes-space"),
+    ).toBe(true);
+    expect(
+      isRecipeDocumentSelection(
+        {
+          ...matchingPage,
+          databaseMembership: { systemRole: "files" },
+        },
+        "recipe-1",
+        "recipes-space",
+      ),
+    ).toBe(true);
+  });
+
+  it.each([
+    ["a collection document", { database: { id: "collection-1" } }],
+    [
+      "an ordinary collection-row membership",
+      { databaseMembership: { systemRole: null } },
+    ],
+  ])("rejects %s", (_description, membership) => {
+    expect(
+      isRecipeDocumentSelection(
+        { ...matchingPage, ...membership },
+        "recipe-1",
+        "recipes-space",
+      ),
+    ).toBe(false);
+  });
+
+  it("requires the fetched document ID and space to match the selection", () => {
+    expect(
+      isRecipeDocumentSelection(
+        { ...matchingPage, id: "another-recipe" },
+        "recipe-1",
+        "recipes-space",
+      ),
+    ).toBe(false);
+    expect(
+      isRecipeDocumentSelection(
+        { ...matchingPage, spaceId: "another-space" },
+        "recipe-1",
+        "recipes-space",
+      ),
+    ).toBe(false);
+  });
+});
 
 describe("parseRecipeContent", () => {
   it("parses a Pad See Ew shaped recipe with grouped components and freeform servings", () => {

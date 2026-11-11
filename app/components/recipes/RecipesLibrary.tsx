@@ -12,7 +12,10 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router";
 
 import { QueryErrorState } from "@/components/QueryErrorState";
-import { parseRecipeContent } from "@/components/recipes/recipe-content";
+import {
+  isRecipeDocumentSelection,
+  parseRecipeContent,
+} from "@/components/recipes/recipe-content";
 import { RecipeMarkdown } from "@/components/recipes/RecipeMarkdown";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -401,13 +404,13 @@ export function RecipesLibrary() {
       retry: false,
     },
   );
-  const selectedDocument =
-    documentQuery.data?.id === selectedRecipeId &&
-    documentQuery.data?.spaceId === activeSpace?.id &&
-    !documentQuery.data?.database &&
-    !documentQuery.data?.databaseMembership
-      ? documentQuery.data
-      : undefined;
+  const selectedDocument = isRecipeDocumentSelection(
+    documentQuery.data,
+    selectedRecipeId,
+    activeSpace?.id,
+  )
+    ? documentQuery.data
+    : undefined;
   const listLoaded = pageState?.spaceId === activeSpace?.id;
   const nextOffset =
     listLoaded && hasMore ? (pageState?.pagination.nextOffset ?? null) : null;

@@ -15,6 +15,31 @@ export type ParsedRecipeContent = {
 
 type Section = "ingredients" | "instructions" | "additional";
 
+export function isRecipeDocumentSelection(
+  document:
+    | {
+        id?: string | null;
+        spaceId?: string | null;
+        database?: unknown;
+        databaseMembership?: { systemRole?: string | null } | null;
+      }
+    | null
+    | undefined,
+  selectedRecipeId: string | null,
+  authorizedSpaceId: string | undefined,
+): boolean {
+  return Boolean(
+    document &&
+    selectedRecipeId &&
+    authorizedSpaceId &&
+    document.id === selectedRecipeId &&
+    document.spaceId === authorizedSpaceId &&
+    !document.database &&
+    (!document.databaseMembership ||
+      document.databaseMembership.systemRole === "files"),
+  );
+}
+
 const normalize = (value: string) =>
   value.trim().replace(/\s+/g, " ").toLocaleLowerCase();
 const clean = (lines: string[]) => lines.join("\n").trim();
