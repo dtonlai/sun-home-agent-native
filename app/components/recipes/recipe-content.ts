@@ -106,6 +106,10 @@ export function parseRecipeContent(content: string): ParsedRecipeContent {
     }
     if ((current === "ingredients" || current === "instructions") && trimmed) {
       const markdownGroup = trimmed.match(/^#{2,6}\s+(.+?)\s*#*$/);
+      const instructionGroup =
+        current === "instructions"
+          ? trimmed.match(/^(.+?)\s+—\s+Instructions\s*$/i)
+          : null;
       let nextLine = i + 1;
       while (nextLine < lines.length && !lines[nextLine].trim()) nextLine++;
       const nextText = lines[nextLine]?.trim() ?? "";
@@ -119,7 +123,9 @@ export function parseRecipeContent(content: string): ParsedRecipeContent {
               (component) => normalize(component.name) === normalize(trimmed),
             ));
       const componentMatch =
-        markdownGroup ??
+        (instructionGroup
+          ? [trimmed, instructionGroup[1]]
+          : markdownGroup) ??
         trimmed.match(/^\*\*(.+?)\*\*\s*:?\s*$/) ??
         trimmed.match(/^([^:#][^:]*):\s*$/) ??
         (standaloneLabel ? [trimmed, trimmed] : null);

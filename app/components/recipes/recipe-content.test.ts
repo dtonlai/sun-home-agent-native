@@ -18,9 +18,9 @@ Stir Fry
 - noodles
 
 Instructions
-Sauce
+Sauce — Instructions
 Mix sauce.
-Stir Fry
+Stir Fry — Instructions
 Cook in a hot wok.
 
 Source: Family notes
@@ -59,9 +59,9 @@ Beef Marinade
 - soy sauce
 
 ## Instructions
-Beef
+Beef — Instructions
 Slice the beef thinly.
-Beef Marinade
+Beef Marinade — Instructions
 Marinate the beef.
 
 Source: Cookbook`);

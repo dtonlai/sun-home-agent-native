@@ -1,14 +1,22 @@
 # Local recipe sample data
 
 Use the sample-data command when you want to inspect the Recipes viewer before
-adding household recipes:
+adding household recipes. For a disposable validation run, use the explicitly
+approved temporary PGlite path below; don't omit `DATABASE_URL` or fall back to
+the repository's default `data/pglite` database.
 
 ```bash
-pnpm seed:test-recipes
+export DATABASE_URL='pglite:/tmp/sun-home-recipes-pglite.0I8UnQ/db'
+pnpm dev
 ```
 
-Keep the local app running with `pnpm dev` and sign in through its local
-Welcome screen in another terminal before running the seed command.
+Keep the app running and sign in through its local Welcome screen. In a second
+terminal, set the same target before invoking the seed command:
+
+```bash
+export DATABASE_URL='pglite:/tmp/sun-home-recipes-pglite.0I8UnQ/db'
+pnpm seed:test-recipes
+```
 
 The command checks that the app targets one local PGlite database, then shows
 which marked pages it plans to create and requires interactive approval before
