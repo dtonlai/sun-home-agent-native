@@ -102,12 +102,10 @@ export function parseRecipeContent(content: string): ParsedRecipeContent {
       buckets.additional.push(line);
       continue;
     }
-    if (
-      (current === "ingredients" || current === "instructions") &&
-      trimmed &&
-      !trimmed.startsWith("#")
-    ) {
+    if ((current === "ingredients" || current === "instructions") && trimmed) {
+      const markdownGroup = trimmed.match(/^#{2,6}\s+(.+?)\s*#*$/);
       const componentMatch =
+        markdownGroup ??
         trimmed.match(/^\*\*(.+?)\*\*\s*:?\s*$/) ??
         trimmed.match(/^([^:#][^:]*):\s*$/);
       if (componentMatch) {

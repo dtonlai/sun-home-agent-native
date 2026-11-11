@@ -40,30 +40,39 @@ Related links: [Technique](https://example.com)`);
     expect(parsed.additional).toContain("Related links:");
   });
 
-  it("supports a Beef Chow Fun shaped one-sided group and preserves additional labels", () => {
+  it("keeps Beef and Beef Marinade as separate top-level Markdown groups", () => {
     const parsed = parseRecipeContent(`Beef Chow Fun — Cantonese
 Serving Size: 4-5 people
 
-Ingredients:
-Beef Marinade:
+## Ingredients
+### Beef
+- 1 lb flank steak
+### Beef Marinade
 - beef
 - soy sauce
 
-Directions:
+## Instructions
+### Beef
+Slice the beef thinly.
+### Beef Marinade
 Marinate the beef.
-Stir fry quickly.
 
 Source: Cookbook`);
 
     expect(parsed.servings).toBe("4-5 people");
     expect(parsed.components).toEqual([
       {
+        name: "Beef",
+        ingredients: "- 1 lb flank steak",
+        instructions: "Slice the beef thinly.",
+      },
+      {
         name: "Beef Marinade",
         ingredients: "- beef\n- soy sauce",
-        instructions: "",
+        instructions: "Marinate the beef.",
       },
     ]);
-    expect(parsed.instructions).toBe("Marinate the beef.\nStir fry quickly.");
+    expect(parsed.instructions).toBe("");
     expect(parsed.additional).toBe(
       "Beef Chow Fun — Cantonese\nSource: Cookbook",
     );
