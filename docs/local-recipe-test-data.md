@@ -11,10 +11,13 @@ pnpm dev
 ```
 
 Keep the app running and sign in through its local Welcome screen. In a second
-terminal, set the same target before invoking the seed command:
+terminal, set the same target and the email used for the local Content session
+before invoking the seed command. The command asks for approval before writing;
+answer `y` or `yes` to continue.
 
 ```bash
 export DATABASE_URL='pglite:/tmp/sun-home-recipes-pglite.0I8UnQ/db'
+export AGENT_USER_EMAIL='you@example.com'
 pnpm seed:test-recipes
 ```
 
@@ -26,6 +29,10 @@ named `[LOCAL TEST SAMPLE] Pad See Ew` and
 `[LOCAL TEST SAMPLE] Beef Chow Fun`. Existing pages with those exact titles are
 left untouched on reruns. The page bodies are marked placeholders based on the
 owner's format examples; they are not complete recipes.
+
+The action is hidden from agent and MCP tool discovery. The local CLI bridge
+requires it to be registered in the action route, so a caller gate rejects
+regular HTTP and frontend callers before the seed handler runs.
 
 The script refuses PostgreSQL, remote, empty, conflicting, or otherwise
 ambiguous database URL settings. It never overwrites or deletes Content and

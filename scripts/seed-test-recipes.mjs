@@ -62,6 +62,9 @@ Related links: [Sample link placeholder]`,
   },
 ];
 
+export const APPROVAL_CONFIRMATION =
+  "Add marked Pad See Ew and Beef Chow Fun placeholders to the local Recipes space";
+
 function parseEnv(text) {
   const values = [];
   for (const line of text.split(/\r?\n/)) {
@@ -110,7 +113,9 @@ export function validateLocalDatabaseTarget({
     );
   }
   if (entries.length === 0) {
-    return { kind: "pglite", path: resolve(root, "data/pglite") };
+    throw new Error(
+      "DATABASE_URL must explicitly target local PGlite storage; refusing the default data/pglite database.",
+    );
   }
 
   const targets = entries.map(({ key, source, value }) => {
@@ -142,11 +147,19 @@ export function runSeedAction({
   spawn = spawnSync,
 } = {}) {
   validateLocalDatabaseTarget({ env, cwd });
-  const child = spawn("pnpm", ["action", "seed-test-recipes"], {
-    cwd: resolve(cwd),
-    env,
-    stdio: "inherit",
-  });
+  const child = spawn(
+    "pnpm",
+    [
+      "action",
+      "seed-test-recipes",
+      JSON.stringify({ confirmation: APPROVAL_CONFIRMATION }),
+    ],
+    {
+      cwd: resolve(cwd),
+      env,
+      stdio: "inherit",
+    },
+  );
   if (child.error) throw child.error;
   if (child.status !== 0) {
     throw new Error(

@@ -4,18 +4,15 @@ import { resolve } from "node:path";
 
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
-const { approveQuestion } = vi.hoisted(() => ({
-  approveQuestion: vi.fn(async () => "y"),
-}));
-
-vi.mock("node:readline/promises", () => ({
-  createInterface: () => ({ question: approveQuestion, close: vi.fn() }),
-}));
-
 // @ts-ignore The executable .mjs script is exercised directly by Vitest.
 import * as seedScript from "./seed-test-recipes.mjs";
 
-const { SAMPLE_PAGES, runSeedAction, validateLocalDatabaseTarget } = seedScript;
+const {
+  APPROVAL_CONFIRMATION,
+  SAMPLE_PAGES,
+  runSeedAction,
+  validateLocalDatabaseTarget,
+} = seedScript;
 
 const TEST_DB_PATH = resolve(
   process.env.TMPDIR ?? "/tmp",
@@ -23,7 +20,7 @@ const TEST_DB_PATH = resolve(
 );
 const ORIGINAL_DATABASE_URL = process.env.DATABASE_URL;
 const TEST_OWNER = "recipe-seed-test@example.local";
-let seedAction: (args: string[]) => Promise<void>;
+let seedAction: typeof import("../actions/seed-test-recipes.js").default;
 let getDbExec: typeof import("@agent-native/core/db").getDbExec;
 let listDocuments: typeof import("../actions/list-documents.js").default;
 let getDocument: typeof import("../actions/get-document.js").default;
@@ -47,14 +44,6 @@ beforeAll(async () => {
   listDocuments = (await import("../actions/list-documents.js")).default;
   getDocument = (await import("../actions/get-document.js")).default;
   updateDocument = (await import("../actions/update-document.js")).default;
-  Object.defineProperty(process.stdin, "isTTY", {
-    configurable: true,
-    value: true,
-  });
-  Object.defineProperty(process.stdout, "isTTY", {
-    configurable: true,
-    value: true,
-  });
 }, 60000);
 
 afterAll(async () => {
@@ -95,6 +84,13 @@ describe("seed:test-recipes safeguards", () => {
         files: [],
       }),
     ).toThrow(/different targets/);
+    expect(() =>
+      validateLocalDatabaseTarget({
+        cwd: "/tmp/recipe-seed",
+        env: {},
+        files: [],
+      }),
+    ).toThrow(/refusing the default data\/pglite database/);
   });
 
   it("rejects a remote database URL in an env file even when process env uses PGlite", () => {
@@ -128,7 +124,11 @@ describe("seed:test-recipes safeguards", () => {
     expect(spawn).toHaveBeenCalledTimes(1);
     expect(spawn).toHaveBeenCalledWith(
       "pnpm",
-      ["action", "seed-test-recipes"],
+      [
+        "action",
+        "seed-test-recipes",
+        JSON.stringify({ confirmation: APPROVAL_CONFIRMATION }),
+      ],
       expect.objectContaining({
         cwd: "/tmp/isolated-recipe-seed",
         stdio: "inherit",
@@ -149,6 +149,21 @@ describe("seed:test-recipes safeguards", () => {
     expect(spawn).not.toHaveBeenCalled();
   });
 
+  it("requires CLI approval and refuses non-CLI callers", () => {
+    expect(seedAction.needsApproval).toBe(true);
+    expect(seedAction.agentTool).toBe(false);
+    expect(seedAction.mcpTool).toBe(false);
+  });
+
+  it.each(["http", "frontend", "tool", "mcp"] as const)(
+    "rejects %s callers before writing",
+    async (caller) => {
+      await expect(
+        seedAction.run({ confirmation: APPROVAL_CONFIRMATION }, { caller }),
+      ).rejects.toThrow("Not authorized");
+    },
+  );
+
   it("keeps the fixtures visibly marked with owner-shaped group labels", () => {
     expect(SAMPLE_PAGES).toHaveLength(2);
     expect(
@@ -164,22 +179,13 @@ describe("seed:test-recipes safeguards", () => {
   });
 
   it("creates both samples in isolated PGlite, preserves edits, and skips them on rerun", async () => {
-    approveQuestion.mockClear();
-    approveQuestion.mockResolvedValueOnce("n");
-    await asTestOwner(() => seedAction([]));
-    expect(approveQuestion).toHaveBeenCalledTimes(1);
-    const noWriteSpaces = await asTestOwner(async () => {
-      const listSpaces = (await import("../actions/list-content-spaces.js"))
-        .default;
-      return await listSpaces.run({});
-    });
-    expect(noWriteSpaces.spaces.some((space) => space.name === "Recipes")).toBe(
-      false,
+    const created = await asTestOwner(() =>
+      seedAction.run(
+        { confirmation: APPROVAL_CONFIRMATION },
+        { caller: "cli" },
+      ),
     );
-
-    approveQuestion.mockClear();
-    await asTestOwner(() => seedAction([]));
-    expect(approveQuestion).toHaveBeenCalledTimes(1);
+    expect(created).toEqual({ created: 2, skipped: 0 });
 
     const spaces = await asTestOwner(async () => {
       const listSpaces = (await import("../actions/list-content-spaces.js"))
@@ -242,9 +248,13 @@ describe("seed:test-recipes safeguards", () => {
         content: `${SAMPLE_PAGES[0].content}\n\nOwner edit to keep`,
       });
     });
-    approveQuestion.mockClear();
-    await asTestOwner(() => seedAction([]));
-    expect(approveQuestion).not.toHaveBeenCalled();
+    const rerun = await asTestOwner(() =>
+      seedAction.run(
+        { confirmation: APPROVAL_CONFIRMATION },
+        { caller: "cli" },
+      ),
+    );
+    expect(rerun).toEqual({ created: 0, skipped: 2 });
 
     const secondRead = await asTestOwner(async () => {
       const input = {

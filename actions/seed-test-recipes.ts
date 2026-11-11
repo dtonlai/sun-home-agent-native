@@ -1,6 +1,6 @@
-import { createInterface } from "node:readline/promises";
-
+import { defineAction } from "@agent-native/core/action";
 import { getRequestUserEmail } from "@agent-native/core/server/request-context";
+import { z } from "zod";
 
 // @ts-ignore The CLI script and action share fixtures and the local DB guard.
 import * as seedScript from "../scripts/seed-test-recipes.mjs";
@@ -9,7 +9,8 @@ import createDocument from "./create-document.js";
 import listContentSpaces from "./list-content-spaces.js";
 import listDocuments from "./list-documents.js";
 
-const { SAMPLE_PAGES, validateLocalDatabaseTarget } = seedScript;
+const { APPROVAL_CONFIRMATION, SAMPLE_PAGES, validateLocalDatabaseTarget } =
+  seedScript;
 const PAGE_SIZE = 100;
 const SPACE_REQUEST_ID = "local-seed-test-recipes-v1";
 const [PAD_SEE_EW, BEEF_CHOW_FUN] = SAMPLE_PAGES;
@@ -47,25 +48,6 @@ async function allPages(spaceId: string) {
   );
 }
 
-async function confirm(summary: string) {
-  if (!process.stdin.isTTY || !process.stdout.isTTY) {
-    throw new Error(
-      "Interactive approval is required; rerun this action from a terminal.",
-    );
-  }
-  const readline = createInterface({
-    input: process.stdin,
-    output: process.stdout,
-  });
-  try {
-    const answer = await readline.question(`${summary}\nContinue? [y/N] `);
-    if (!/^(y|yes)$/i.test(answer.trim())) return false;
-    return true;
-  } finally {
-    readline.close();
-  }
-}
-
 function assertWritableSpace(space: { role: string } | undefined) {
   if (!space || !["owner", "editor"].includes(space.role)) {
     throw new Error(
@@ -88,10 +70,7 @@ async function createSamplePage(
   return createDocument.run(input);
 }
 
-export default async function seedTestRecipes(args: string[]) {
-  if (args.length > 0) {
-    throw new Error("This CLI-only action takes no arguments.");
-  }
+async function seedTestRecipes() {
   validateLocalDatabaseTarget();
   if (!getRequestUserEmail()) {
     throw new Error(
@@ -120,24 +99,7 @@ export default async function seedTestRecipes(args: string[]) {
       !pages.some((page) => page.title === sample.title),
   );
   if (space && missing.length === 0) {
-    console.log(
-      "Both marked recipe sample pages already exist; nothing to create.",
-    );
-    return;
-  }
-
-  const summary = [
-    space
-      ? "Reuse the exact Recipes space."
-      : "Create a private Content space named Recipes.",
-    ...missing.map(
-      (sample: { title: string }) => `Create ordinary page ${sample.title}.`,
-    ),
-    "Existing pages will be skipped; no content will be overwritten or deleted.",
-  ].join("\n");
-  if (!(await confirm(summary))) {
-    console.log("Cancelled; no sample data was written.");
-    return;
+    return { created: 0, skipped: LOCAL_SAMPLE_TITLES.length };
   }
 
   if (!space) {
@@ -187,7 +149,20 @@ export default async function seedTestRecipes(args: string[]) {
       `Post-write verification is missing marked sample page(s): ${absent.join(", ")}.`,
     );
   }
-  console.log(
-    `Verified ${LOCAL_SAMPLE_TITLES.length} marked sample pages in the Recipes space; created ${createdCount}, skipped ${LOCAL_SAMPLE_TITLES.length - createdCount}.`,
-  );
+  return {
+    created: createdCount,
+    skipped: LOCAL_SAMPLE_TITLES.length - createdCount,
+  };
 }
+
+export default defineAction({
+  description:
+    "Seed the two clearly marked Pad See Ew and Beef Chow Fun placeholder pages in a local PGlite Recipes space. Requires interactive CLI approval; existing pages are never changed.",
+  schema: z.object({ confirmation: z.literal(APPROVAL_CONFIRMATION) }),
+  outputSchema: z.object({ created: z.number(), skipped: z.number() }),
+  needsApproval: true,
+  authorize: (_args, context) => context?.caller === "cli",
+  agentTool: false,
+  mcpTool: false,
+  run: seedTestRecipes,
+});
