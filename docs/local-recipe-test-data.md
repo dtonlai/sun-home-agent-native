@@ -28,7 +28,10 @@ writing. It uses the registered Content operations, creates or reuses the one ex
 named `[LOCAL TEST SAMPLE] Pad See Ew` and
 `[LOCAL TEST SAMPLE] Beef Chow Fun`. Existing pages with those exact titles are
 left untouched on reruns. The page bodies are marked placeholders based on the
-owner's format examples; they are not complete recipes.
+owner's format examples; they are not complete recipes. The two page writes are
+not atomic: if the first succeeds and the second fails, rerun the command to
+create the missing sample. It skips the page already created and preserves its
+content.
 
 The action is hidden from agent and MCP tool discovery. The local CLI bridge
 requires it to be registered in the action route, so a caller gate rejects

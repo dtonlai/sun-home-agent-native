@@ -179,13 +179,35 @@ describe("seed:test-recipes safeguards", () => {
   });
 
   it("creates both samples in isolated PGlite, preserves edits, and skips them on rerun", async () => {
-    const created = await asTestOwner(() =>
+    const createDocument = (await import("../actions/create-document.js"))
+      .default;
+    const originalCreateDocumentRun = createDocument.run;
+    const createDocumentRun = vi.spyOn(createDocument, "run");
+    createDocumentRun
+      .mockImplementationOnce((input, context) =>
+        originalCreateDocumentRun(input, context),
+      )
+      .mockImplementationOnce(async () => {
+        throw new Error("Injected failure after the first sample write.");
+      });
+
+    await expect(
+      asTestOwner(() =>
+        seedAction.run(
+          { confirmation: APPROVAL_CONFIRMATION },
+          { caller: "cli" },
+        ),
+      ),
+    ).rejects.toThrow("Injected failure after the first sample write.");
+    createDocumentRun.mockRestore();
+
+    const recovered = await asTestOwner(() =>
       seedAction.run(
         { confirmation: APPROVAL_CONFIRMATION },
         { caller: "cli" },
       ),
     );
-    expect(created).toEqual({ created: 2, skipped: 0 });
+    expect(recovered).toEqual({ created: 1, skipped: 1 });
 
     const spaces = await asTestOwner(async () => {
       const listSpaces = (await import("../actions/list-content-spaces.js"))
