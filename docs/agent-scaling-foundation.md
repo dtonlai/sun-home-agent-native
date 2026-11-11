@@ -1,9 +1,10 @@
 # Phase 4 recipe scaling path audit
 
 Research date: 2026-11-10. Installed framework: `@agent-native/core` 0.226.0.
-This is a source-and-documentation audit only: no provider key, model request,
-database, app server, or production configuration was used. It does not claim
-Phase 3 is complete.
+This note began as a source-and-documentation audit. P4A-T05 adds the OpenRouter
+AI SDK provider package required by the installed engine; no provider key,
+model request, database, app server, or production configuration has been used
+yet. It does not claim Phase 3 is complete.
 
 ## Recommended contract
 
@@ -74,6 +75,17 @@ Core-supported DeepSeek Flash model and a reasonable first candidate to price
 and test alongside `deepseek/deepseek-v4-pro`. “Flash” is not price evidence;
 its current price and model-specific tool, structured-output, and streaming
 capabilities remain unverified pending official OpenRouter catalog access.
+
+P4A-T05 dependency evidence: Core 0.226.0 declares
+`@openrouter/ai-sdk-provider >=2` as an optional peer and dynamically imports
+that package for `ai-sdk:openrouter`. This app uses AI SDK 7, so the compatible
+provider line is 3.x: `@openrouter/ai-sdk-provider` 3.1.0 declares peer
+`ai: ^7.0.0`. The 2.10.0 line instead requires AI SDK 6 and is not used. The
+provider is now a direct app dependency at `^3.1.0`; the existing
+`@ai-sdk/openai` dependency remains unchanged. `pnpm install
+--frozen-lockfile` passes, and Core's OpenRouter engine constructs a model
+without the prior missing-package error. A provider request and the end-to-end
+recipe-scaling check remain pending explicit owner authorization.
 
 OpenRouter's official public model catalog request to
 `https://openrouter.ai/api/v1/models` returned HTTP 403 with “Approval required

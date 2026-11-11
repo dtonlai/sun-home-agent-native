@@ -56,16 +56,16 @@ importers:
     dependencies:
       '@agent-native/core':
         specifier: 0.226.0
-        version: 0.226.0(97b76b2178179959a72ae6acf0e23424)
+        version: 0.226.0(f8f6b6298e11370f18c43675ae46a02d)
       '@agent-native/creative-context':
         specifier: 0.8.68
-        version: 0.8.68(@agent-native/core@0.226.0(97b76b2178179959a72ae6acf0e23424))(@agent-native/toolkit@0.226.0(1f2b4cb03194a118d978da9b0f220244))(@tabler/icons-react@3.44.0(react@19.3.1))(@tanstack/react-query@5.101.2(react@19.3.1))(bare-buffer@3.7.1)(drizzle-orm@0.45.4(@electric-sql/pglite@0.5.16)(@neondatabase/serverless@1.2.0)(@opentelemetry/api@1.10.0)(kysely@0.29.8)(postgres@3.4.9))(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
+        version: 0.8.68(@agent-native/core@0.226.0(f8f6b6298e11370f18c43675ae46a02d))(@agent-native/toolkit@0.226.0(772c26cd2a89b718de832d81777af34d))(@tabler/icons-react@3.44.0(react@19.3.1))(@tanstack/react-query@5.101.2(react@19.3.1))(bare-buffer@3.7.1)(drizzle-orm@0.45.4(@electric-sql/pglite@0.5.16)(@neondatabase/serverless@1.2.0)(@opentelemetry/api@1.10.0)(kysely@0.29.8)(postgres@3.4.9))(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
       '@agent-native/otel':
         specifier: 0.1.35
-        version: 0.1.35(@agent-native/core@0.226.0(97b76b2178179959a72ae6acf0e23424))
+        version: 0.1.35(@agent-native/core@0.226.0(f8f6b6298e11370f18c43675ae46a02d))
       '@agent-native/toolkit':
         specifier: 0.226.0
-        version: 0.226.0(1f2b4cb03194a118d978da9b0f220244)
+        version: 0.226.0(772c26cd2a89b718de832d81777af34d)
       '@ai-sdk/openai':
         specifier: ^4.0.51
         version: 4.0.113(zod@4.6.7)
@@ -87,6 +87,9 @@ importers:
       '@fontsource-variable/jetbrains-mono':
         specifier: ^5.2.8
         version: 5.3.0
+      '@openrouter/ai-sdk-provider':
+        specifier: ^3.1.0
+        version: 3.1.0(ai@7.0.168(zod@4.6.7))(zod@4.6.7)
       '@radix-ui/react-alert-dialog':
         specifier: ^1.1.15
         version: 1.2.1(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
@@ -1607,6 +1610,13 @@ packages:
 
   '@nodable/entities@3.1.0':
     resolution: {integrity: sha512-LsS/DjHr+uDM647Gru/cA8+J3a3HfhttwCKLyuoyN7yXTFCxKBtSgMQBvrW9yNPa2/zDRUNuGPaH5QUFoa4arQ==}
+
+  '@openrouter/ai-sdk-provider@3.1.0':
+    resolution: {integrity: sha512-BQy1TA9fKrh47s9ivsO6FY5QimN7GUF0i8Qon3pkxQclEgShso0dClpcWn8OIyPLEZZPFaFKgI8TW4S/O0p0Dw==}
+    engines: {node: '>=22'}
+    peerDependencies:
+      ai: ^7.0.0
+      zod: ^3.25.76 || ^4.1.8
 
   '@opentelemetry/api-logs@0.222.0':
     resolution: {integrity: sha512-9mb1If+IF6u0ZVXkHQ6ogEae5HwA6ajIVUgpSDQyRASxft6BSXHvBvPooRle3yFN/fKnCdSOnuu0OC3PLcF6+g==}
@@ -6177,7 +6187,7 @@ snapshots:
       '@ag-ui/core': 0.0.59
       '@noble/hashes': 2.4.0
 
-  '@agent-native/core@0.226.0(97b76b2178179959a72ae6acf0e23424)':
+  '@agent-native/core@0.226.0(f8f6b6298e11370f18c43675ae46a02d)':
     dependencies:
       '@agent-native/agentkit': 0.226.0
       '@agent-native/recap-cli': 0.5.99(playwright@1.65.0)
@@ -6238,6 +6248,7 @@ snapshots:
     optionalDependencies:
       '@ai-sdk/openai': 4.0.113(zod@4.6.7)
       '@electric-sql/pglite': 0.5.16
+      '@openrouter/ai-sdk-provider': 3.1.0(ai@7.0.168(zod@4.6.7))(zod@4.6.7)
       '@opentelemetry/api': 1.10.0
       '@tailwindcss/typography': 0.5.20(tailwindcss@4.3.5)
       '@tailwindcss/vite': 4.3.5(vite@8.1.0(@types/node@24.19.2)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1))
@@ -6303,14 +6314,14 @@ snapshots:
       - vitest
       - vue
 
-  '@agent-native/creative-context@0.8.68(@agent-native/core@0.226.0(97b76b2178179959a72ae6acf0e23424))(@agent-native/toolkit@0.226.0(1f2b4cb03194a118d978da9b0f220244))(@tabler/icons-react@3.44.0(react@19.3.1))(@tanstack/react-query@5.101.2(react@19.3.1))(bare-buffer@3.7.1)(drizzle-orm@0.45.4(@electric-sql/pglite@0.5.16)(@neondatabase/serverless@1.2.0)(@opentelemetry/api@1.10.0)(kysely@0.29.8)(postgres@3.4.9))(react-dom@19.3.1(react@19.3.1))(react@19.3.1)':
+  '@agent-native/creative-context@0.8.68(@agent-native/core@0.226.0(f8f6b6298e11370f18c43675ae46a02d))(@agent-native/toolkit@0.226.0(772c26cd2a89b718de832d81777af34d))(@tabler/icons-react@3.44.0(react@19.3.1))(@tanstack/react-query@5.101.2(react@19.3.1))(bare-buffer@3.7.1)(drizzle-orm@0.45.4(@electric-sql/pglite@0.5.16)(@neondatabase/serverless@1.2.0)(@opentelemetry/api@1.10.0)(kysely@0.29.8)(postgres@3.4.9))(react-dom@19.3.1(react@19.3.1))(react@19.3.1)':
     dependencies:
-      '@agent-native/core': 0.226.0(97b76b2178179959a72ae6acf0e23424)
+      '@agent-native/core': 0.226.0(f8f6b6298e11370f18c43675ae46a02d)
       '@tanstack/react-query': 5.101.2(react@19.3.1)
       drizzle-orm: 0.45.4(@electric-sql/pglite@0.5.16)(@neondatabase/serverless@1.2.0)(@opentelemetry/api@1.10.0)(kysely@0.29.8)(postgres@3.4.9)
       zod: 4.6.7
     optionalDependencies:
-      '@agent-native/toolkit': 0.226.0(1f2b4cb03194a118d978da9b0f220244)
+      '@agent-native/toolkit': 0.226.0(772c26cd2a89b718de832d81777af34d)
       '@sparticuz/chromium-min': 149.0.0(bare-buffer@3.7.1)
       '@tabler/icons-react': 3.44.0(react@19.3.1)
       officeparser: 7.8.0
@@ -6325,9 +6336,9 @@ snapshots:
       - react-native-b4a
       - supports-color
 
-  '@agent-native/otel@0.1.35(@agent-native/core@0.226.0(97b76b2178179959a72ae6acf0e23424))':
+  '@agent-native/otel@0.1.35(@agent-native/core@0.226.0(f8f6b6298e11370f18c43675ae46a02d))':
     dependencies:
-      '@agent-native/core': 0.226.0(97b76b2178179959a72ae6acf0e23424)
+      '@agent-native/core': 0.226.0(f8f6b6298e11370f18c43675ae46a02d)
       '@opentelemetry/api': 1.10.0
       '@opentelemetry/context-async-hooks': 2.12.1(@opentelemetry/api@1.10.0)
       '@opentelemetry/exporter-metrics-otlp-proto': 0.222.0(@opentelemetry/api@1.10.0)
@@ -6340,7 +6351,7 @@ snapshots:
     optionalDependencies:
       playwright: 1.65.0
 
-  '@agent-native/toolkit@0.226.0(1f2b4cb03194a118d978da9b0f220244)':
+  '@agent-native/toolkit@0.226.0(772c26cd2a89b718de832d81777af34d)':
     dependencies:
       '@agent-native/agentkit': 0.226.0
       '@assistant-ui/react': 0.12.28(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(ai@7.0.168(zod@4.6.7))(immer@11.2.10)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(use-sync-external-store@1.7.0(react@19.3.1))
@@ -6438,7 +6449,7 @@ snapshots:
       yjs: 13.6.33
       zod: 4.6.7
     optionalDependencies:
-      '@agent-native/core': 0.226.0(97b76b2178179959a72ae6acf0e23424)
+      '@agent-native/core': 0.226.0(f8f6b6298e11370f18c43675ae46a02d)
     transitivePeerDependencies:
       - '@aws-sdk/credential-provider-node'
       - '@babel/runtime'
@@ -7388,6 +7399,11 @@ snapshots:
   '@noble/hashes@2.4.0': {}
 
   '@nodable/entities@3.1.0': {}
+
+  '@openrouter/ai-sdk-provider@3.1.0(ai@7.0.168(zod@4.6.7))(zod@4.6.7)':
+    dependencies:
+      ai: 7.0.168(zod@4.6.7)
+      zod: 4.6.7
 
   '@opentelemetry/api-logs@0.222.0':
     dependencies:
