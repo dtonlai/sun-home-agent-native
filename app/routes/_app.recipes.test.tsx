@@ -125,6 +125,7 @@ vi.mock("@/components/ui/skeleton", () => ({
 
 import { RecipesLibrary } from "@/components/recipes/RecipesLibrary";
 import { navigationStateForLocation } from "@/hooks/use-navigation-state";
+import { messagesByLocale } from "@/i18n-data";
 
 function render(root: Root) {
   act(() => root.render(<RecipesLibrary />));
@@ -199,6 +200,26 @@ describe("Recipes library", () => {
 
     expect(container.textContent).toContain("recipes.spaceMissingTitle");
     expect(container.textContent).toContain("recipes.spaceSetupInstructions");
+    const contentLink =
+      container.querySelector<HTMLAnchorElement>('a[href="/home"]');
+    expect(contentLink?.textContent).toBe("recipes.openContent");
+    const recipeMessages = messagesByLocale["en-US"]?.recipes;
+    expect(recipeMessages?.spaceMissingDescription).toContain(
+      'workspace (space) named exactly "Recipes"',
+    );
+    expect(recipeMessages?.spaceMissingDescription).toContain(
+      'A page titled "Recipes" inside another workspace does not count.',
+    );
+    expect(recipeMessages?.spaceSetupInstructions).toContain(
+      "workspace selector in the sidebar, choose New workspace",
+    );
+    expect(recipeMessages?.spaceSetupInstructions).toContain(
+      'name it exactly "Recipes", then create ordinary recipe pages inside',
+    );
+    expect(recipeMessages?.spaceSetupInstructions).toContain(
+      "Return to /recipes",
+    );
+    expect(recipeMessages?.openContent).toBe("Go to Content");
     expect(fixture.listCalls[fixture.listCalls.length - 1]).toEqual({
       args: expect.objectContaining({
         documentType: "page",

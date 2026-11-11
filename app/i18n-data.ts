@@ -1412,12 +1412,12 @@ const enUS = {
     chooseSpaceTitle: "Choose a Recipes space",
     sharedSpace: "Shared workspace {{id}}",
     personalSpace: "Personal space",
-    spaceMissingTitle: "No Recipes space is available",
+    spaceMissingTitle: "Set up a Recipes workspace",
     spaceMissingDescription:
-      'Recipes reads ordinary Content pages from a space named exactly "Recipes" that you are allowed to access.',
+      'Recipes reads ordinary pages from an accessible Content workspace (space) named exactly "Recipes". A page titled "Recipes" inside another workspace does not count.',
     spaceSetupInstructions:
-      'Create a Content space named "Recipes" and add recipe pages there. This view will find it when you return.',
-    openContent: "Open Content",
+      'In Content, open the workspace selector in the sidebar, choose New workspace, name it exactly "Recipes", then create ordinary recipe pages inside. Return to /recipes to view them.',
+    openContent: "Go to Content",
     spacesError: "Could not load your Content spaces.",
     listError: "Could not load recipes.",
     documentError: "Could not load this recipe.",
