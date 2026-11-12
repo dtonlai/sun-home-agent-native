@@ -23,6 +23,11 @@ type RecipeScalingResultData = {
     servings: string | null;
     ingredientLines: string[];
     instructions: string[];
+    components?: Array<{
+      name: string;
+      ingredientLines: string[];
+      instructions: string[];
+    }>;
     adjustmentExplanations: string[];
   };
 };
@@ -50,6 +55,26 @@ function parseResult(value: unknown): RecipeScalingResultData | null {
     !data.ingredientLines.every((line) => typeof line === "string") ||
     !Array.isArray(data.instructions) ||
     !data.instructions.every((line) => typeof line === "string") ||
+    (data.components !== undefined &&
+      (!Array.isArray(data.components) ||
+        !data.components.every(
+          (component) =>
+            Boolean(component) &&
+            typeof component === "object" &&
+            !Array.isArray(component) &&
+            typeof component.name === "string" &&
+            Boolean(component.name.trim()) &&
+            Array.isArray(component.ingredientLines) &&
+            component.ingredientLines.every(
+              (line: unknown) => typeof line === "string",
+            ) &&
+            Array.isArray(component.instructions) &&
+            component.instructions.every(
+              (line: unknown) => typeof line === "string",
+            ) &&
+            (component.ingredientLines.length > 0 ||
+              component.instructions.length > 0),
+        ))) ||
     !Array.isArray(data.adjustmentExplanations) ||
     !data.adjustmentExplanations.every((line) => typeof line === "string")
   ) {
@@ -62,6 +87,11 @@ function parseResult(value: unknown): RecipeScalingResultData | null {
       servings: data.servings,
       ingredientLines: data.ingredientLines,
       instructions: data.instructions,
+      ...(data.components === undefined
+        ? {}
+        : {
+            components: data.components as RecipeScalingResultData["recipe"]["components"],
+          }),
       adjustmentExplanations: data.adjustmentExplanations,
     },
   };
@@ -170,26 +200,70 @@ function RecipeScalingResult({ context }: ToolRendererProps) {
             {result.recipe.servings}
           </p>
         ) : null}
-        <section aria-label={t("recipes.ingredients")} className="mb-5">
-          <h4 className="mb-2 text-sm font-semibold">
-            {t("recipes.ingredients")}
-          </h4>
-          <ul className="list-disc space-y-1 ps-5 text-sm">
-            {result.recipe.ingredientLines.map((line, index) => (
-              <li key={`${index}-${line}`}>{line}</li>
-            ))}
-          </ul>
-        </section>
-        <section aria-label={t("recipes.instructions")} className="mb-5">
-          <h4 className="mb-2 text-sm font-semibold">
-            {t("recipes.instructions")}
-          </h4>
-          <ol className="list-decimal space-y-2 ps-5 text-sm">
-            {result.recipe.instructions.map((line, index) => (
-              <li key={`${index}-${line}`}>{line}</li>
-            ))}
-          </ol>
-        </section>
+        {result.recipe.ingredientLines.length > 0 ? (
+          <section aria-label={t("recipes.ingredients")} className="mb-5">
+            <h4 className="mb-2 text-sm font-semibold">
+              {t("recipes.ingredients")}
+            </h4>
+            <ul className="list-disc space-y-1 ps-5 text-sm">
+              {result.recipe.ingredientLines.map((line, index) => (
+                <li key={`${index}-${line}`}>{line}</li>
+              ))}
+            </ul>
+          </section>
+        ) : null}
+        {result.recipe.instructions.length > 0 ? (
+          <section aria-label={t("recipes.instructions")} className="mb-5">
+            <h4 className="mb-2 text-sm font-semibold">
+              {t("recipes.instructions")}
+            </h4>
+            <ol className="list-decimal space-y-2 ps-5 text-sm">
+              {result.recipe.instructions.map((line, index) => (
+                <li key={`${index}-${line}`}>{line}</li>
+              ))}
+            </ol>
+          </section>
+        ) : null}
+        {result.recipe.components?.map((component, componentIndex) => (
+          <section
+            key={`${componentIndex}-${component.name}`}
+            aria-label={component.name}
+            className="mb-5"
+          >
+            <h4 className="mb-2 break-words text-sm font-semibold">
+              {component.name}
+            </h4>
+            {component.ingredientLines.length > 0 ? (
+              <section
+                aria-label={`${component.name} ${t("recipes.ingredients")}`}
+                className="mb-3"
+              >
+                <h5 className="mb-2 text-sm font-medium">
+                  {t("recipes.ingredients")}
+                </h5>
+                <ul className="list-disc space-y-1 ps-5 text-sm">
+                  {component.ingredientLines.map((line, index) => (
+                    <li key={`${index}-${line}`}>{line}</li>
+                  ))}
+                </ul>
+              </section>
+            ) : null}
+            {component.instructions.length > 0 ? (
+              <section
+                aria-label={`${component.name} ${t("recipes.instructions")}`}
+              >
+                <h5 className="mb-2 text-sm font-medium">
+                  {t("recipes.instructions")}
+                </h5>
+                <ol className="list-decimal space-y-2 ps-5 text-sm">
+                  {component.instructions.map((line, index) => (
+                    <li key={`${index}-${line}`}>{line}</li>
+                  ))}
+                </ol>
+              </section>
+            ) : null}
+          </section>
+        ))}
         {result.recipe.adjustmentExplanations.length > 0 ? (
           <section aria-label={t("recipes.adjustments")}>
             <h4 className="mb-2 text-sm font-semibold">
