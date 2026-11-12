@@ -67,8 +67,13 @@ Relevant installed skill guides may include `content`, `document-editing`, `acti
   named exactly `Recipes` with `list-content-spaces`. Browse ordinary pages with
   `list-documents` (`documentType: "page"`, following pagination on demand) and
   read a selected page with `get-document` by its stable Content ID. Confirm
-  the returned document belongs to the selected Recipes space before showing
-  it. Use the Recipes route for navigation and retain the stable ID in its URL.
+  the returned document's `id` and `spaceId` match the selected recipe and
+  authorized Recipes space before showing it. The document must not be a
+  collection document (`database` is absent), and it may have no
+  `databaseMembership` or only the system Files membership
+  (`databaseMembership.systemRole === "files"`); reject ordinary collection-row
+  memberships. Use the Recipes route for navigation and retain the stable ID in
+  its URL.
   Keep these operations read-only; never create a Recipes space or create, move,
   or edit Content automatically.
 - For explicit scaling, the Recipes UI alone calls `start-recipe-scaling` after
@@ -80,6 +85,7 @@ Relevant installed skill guides may include `content`, `document-editing`, `acti
   scaled copy to Content. The result action renders an ephemeral comparison.
 - Recipes reads Content documents by stable identifiers. Changes to a source document must appear in Recipes; do not silently duplicate canonical recipe data.
 - Keep recipe parsing/template requirements minimal for the first proof of functionality. Use a representative sample recipe; defer a comprehensive schema.
+- For explicit local Recipes viewer validation, `pnpm seed:test-recipes` invokes a CLI-only approved seed action. It requires interactive confirmation, targets local PGlite only, creates/reuses the exact `Recipes` space and marked sample pages, skips existing titles, and never overwrites or deletes documents. It is never run automatically by the agent and must not be used against remote databases.
 - Support 0.5×, 1×, 1.5×, 2×, and custom scaling. **Invoke the model only on an explicit Scale action.**
 - Use the Agent Native agent and **OpenRouter** (prefer a compatible cost-effective DeepSeek model). Verify tool calling, structured output, and any needed streaming behavior against the selected model.
 - Scaling must account for non-linear cooking factors such as oven temperature, time, seasoning, equipment capacity, and batching. Validate returned data; show useful errors.

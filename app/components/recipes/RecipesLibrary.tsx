@@ -12,7 +12,10 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router";
 
 import { QueryErrorState } from "@/components/QueryErrorState";
-import { parseRecipeContent } from "@/components/recipes/recipe-content";
+import {
+  isRecipeDocumentSelection,
+  parseRecipeContent,
+} from "@/components/recipes/recipe-content";
 import { RecipeMarkdown } from "@/components/recipes/RecipeMarkdown";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -89,7 +92,10 @@ function RecipeDetails({
   const content = parseRecipeContent(document.content ?? "");
   const title = document.title?.trim() || fallbackTitle;
   const hasBody = Boolean(
-    content.ingredients || content.instructions || content.additional,
+    content.ingredients ||
+    content.instructions ||
+    content.components.length ||
+    content.additional,
   );
   const requestScaling = async () => {
     if (factor === null || !Number.isFinite(factor) || factor <= 0) return;
@@ -223,11 +229,27 @@ function RecipeDetails({
                 documentId={document.id}
                 content={content.ingredients}
               />
-            ) : (
+            ) : null}
+            {content.components.map((component) => (
+              <div key={component.name.toLocaleLowerCase()} className="mt-4">
+                <h4 className="mb-2 text-sm font-semibold">{component.name}</h4>
+                {component.ingredients ? (
+                  <RecipeMarkdown
+                    documentId={document.id}
+                    content={component.ingredients}
+                  />
+                ) : (
+                  <p className="text-sm text-muted-foreground">
+                    {t("recipes.noIngredients")}
+                  </p>
+                )}
+              </div>
+            ))}
+            {!content.ingredients && content.components.length === 0 ? (
               <p className="text-sm text-muted-foreground">
                 {t("recipes.noIngredients")}
               </p>
-            )}
+            ) : null}
           </section>
           <section
             aria-labelledby="recipe-instructions-heading"
@@ -244,11 +266,27 @@ function RecipeDetails({
                 documentId={document.id}
                 content={content.instructions}
               />
-            ) : (
+            ) : null}
+            {content.components.map((component) => (
+              <div key={component.name.toLocaleLowerCase()} className="mt-4">
+                <h4 className="mb-2 text-sm font-semibold">{component.name}</h4>
+                {component.instructions ? (
+                  <RecipeMarkdown
+                    documentId={document.id}
+                    content={component.instructions}
+                  />
+                ) : (
+                  <p className="text-sm text-muted-foreground">
+                    {t("recipes.noInstructions")}
+                  </p>
+                )}
+              </div>
+            ))}
+            {!content.instructions && content.components.length === 0 ? (
               <p className="text-sm text-muted-foreground">
                 {t("recipes.noInstructions")}
               </p>
-            )}
+            ) : null}
           </section>
           {content.additional ? (
             <section className="min-w-0 md:col-span-2">
@@ -366,13 +404,13 @@ export function RecipesLibrary() {
       retry: false,
     },
   );
-  const selectedDocument =
-    documentQuery.data?.id === selectedRecipeId &&
-    documentQuery.data?.spaceId === activeSpace?.id &&
-    !documentQuery.data?.database &&
-    !documentQuery.data?.databaseMembership
-      ? documentQuery.data
-      : undefined;
+  const selectedDocument = isRecipeDocumentSelection(
+    documentQuery.data,
+    selectedRecipeId,
+    activeSpace?.id,
+  )
+    ? documentQuery.data
+    : undefined;
   const listLoaded = pageState?.spaceId === activeSpace?.id;
   const nextOffset =
     listLoaded && hasMore ? (pageState?.pagination.nextOffset ?? null) : null;
