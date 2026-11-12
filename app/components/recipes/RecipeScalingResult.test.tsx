@@ -23,6 +23,7 @@ const fixture = vi.hoisted(() => ({
     name: string;
     args: Record<string, unknown> | undefined;
   }>,
+  queryEnabled: [] as boolean[],
   rendererRegistrations: [] as Array<Record<string, unknown>>,
 }));
 
@@ -32,8 +33,13 @@ vi.mock("@agent-native/core/client/hooks", () => ({
   useSession: () => ({
     session: { email: "alice@example.com", orgId: "org-1" },
   }),
-  useActionQuery: (name: string, args: Record<string, unknown> | undefined) => {
+  useActionQuery: (
+    name: string,
+    args: Record<string, unknown> | undefined,
+    options?: { enabled?: boolean },
+  ) => {
     fixture.queries.push({ name, args });
+    fixture.queryEnabled.push(options?.enabled ?? true);
     return fixture.source;
   },
 }));
@@ -114,6 +120,7 @@ describe("RecipeScalingResult", () => {
     fixture.source.isFetching = false;
     fixture.source.error = null;
     fixture.queries = [];
+    fixture.queryEnabled = [];
     container = document.createElement("div");
     document.body.appendChild(container);
     root = createRoot(container);
@@ -247,6 +254,6 @@ describe("RecipeScalingResult", () => {
     expect(container.querySelector('[role="alert"]')?.textContent).toBe(
       "recipes.scaledResultInvalid",
     );
-    expect(fixture.queries).toHaveLength(0);
+    expect(fixture.queryEnabled).toEqual([false]);
   });
 });

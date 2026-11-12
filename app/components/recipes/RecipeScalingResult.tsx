@@ -90,7 +90,8 @@ function parseResult(value: unknown): RecipeScalingResultData | null {
       ...(data.components === undefined
         ? {}
         : {
-            components: data.components as RecipeScalingResultData["recipe"]["components"],
+            components:
+              data.components as RecipeScalingResultData["recipe"]["components"],
           }),
       adjustmentExplanations: data.adjustmentExplanations,
     },
