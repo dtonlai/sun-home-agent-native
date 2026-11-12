@@ -23,6 +23,7 @@ const fixture = vi.hoisted(() => ({
     name: string;
     args: Record<string, unknown> | undefined;
   }>,
+  queryEnabled: [] as boolean[],
   rendererRegistrations: [] as Array<Record<string, unknown>>,
 }));
 
@@ -32,8 +33,13 @@ vi.mock("@agent-native/core/client/hooks", () => ({
   useSession: () => ({
     session: { email: "alice@example.com", orgId: "org-1" },
   }),
-  useActionQuery: (name: string, args: Record<string, unknown> | undefined) => {
+  useActionQuery: (
+    name: string,
+    args: Record<string, unknown> | undefined,
+    options?: { enabled?: boolean },
+  ) => {
     fixture.queries.push({ name, args });
+    fixture.queryEnabled.push(options?.enabled ?? true);
     return fixture.source;
   },
 }));
@@ -82,14 +88,14 @@ const result = {
   },
 };
 
-function render(root: Root) {
+function render(root: Root, resultJson: unknown = result) {
   act(() =>
     root.render(
       <RecipeScalingResult
         context={{
           toolName: "submit-recipe-scaling-result",
           args: {},
-          resultJson: result,
+          resultJson,
           isRunning: false,
         }}
       />,
@@ -114,6 +120,7 @@ describe("RecipeScalingResult", () => {
     fixture.source.isFetching = false;
     fixture.source.error = null;
     fixture.queries = [];
+    fixture.queryEnabled = [];
     container = document.createElement("div");
     document.body.appendChild(container);
     root = createRoot(container);
@@ -156,5 +163,97 @@ describe("RecipeScalingResult", () => {
     expect(original?.textContent).toContain("recipes.originalRecipe");
     expect(scaled?.textContent).toContain("recipes.scaledRecipe");
     expect(container.firstElementChild?.className).toContain("md:grid-cols-2");
+  });
+
+  it("renders legacy flat ingredient and instruction sections", () => {
+    render(root);
+
+    expect(
+      container.querySelector('[aria-label="recipes.ingredients"]'),
+    ).not.toBeNull();
+    expect(
+      container.querySelector('[aria-label="recipes.instructions"]'),
+    ).not.toBeNull();
+    expect(container.textContent).toContain("6 tomatoes");
+    expect(container.textContent).toContain("Simmer gently until tender.");
+  });
+
+  it("renders grouped-only results under their component names", () => {
+    render(root, {
+      ...result,
+      recipe: {
+        servings: null,
+        ingredientLines: [],
+        instructions: [],
+        components: [
+          {
+            name: "Tomato Sauce",
+            ingredientLines: ["2 cups crushed tomatoes"],
+            instructions: ["Cook until thick."],
+          },
+          {
+            name: "Finish",
+            ingredientLines: ["Fresh basil"],
+            instructions: [],
+          },
+        ],
+        adjustmentExplanations: [],
+      },
+    });
+
+    const sauce = container.querySelector('[aria-label="Tomato Sauce"]');
+    expect(sauce?.textContent).toContain("2 cups crushed tomatoes");
+    expect(sauce?.textContent).toContain("Cook until thick.");
+    expect(
+      container.querySelector('[aria-label="Finish"]')?.textContent,
+    ).toContain("Fresh basil");
+    expect(
+      container.querySelector('[aria-label="recipes.ingredients"]'),
+    ).toBeNull();
+    expect(
+      container.querySelector('[aria-label="recipes.instructions"]'),
+    ).toBeNull();
+  });
+
+  it("keeps flat lines and grouped lines together in mixed results", () => {
+    render(root, {
+      ...result,
+      recipe: {
+        ...result.recipe,
+        ingredientLines: ["1 tablespoon oil"],
+        instructions: [],
+        components: [
+          {
+            name: "Marinade",
+            ingredientLines: ["1 teaspoon ginger"],
+            instructions: ["Whisk together."],
+          },
+        ],
+      },
+    });
+
+    expect(container.textContent).toContain("1 tablespoon oil");
+    expect(container.textContent).toContain("1 teaspoon ginger");
+    expect(container.textContent).toContain("Whisk together.");
+    expect(
+      container.querySelector('[aria-label="recipes.instructions"]'),
+    ).toBeNull();
+  });
+
+  it("rejects malformed optional components at the renderer boundary", () => {
+    render(root, {
+      ...result,
+      recipe: {
+        ...result.recipe,
+        components: [
+          { name: "Broken", ingredientLines: ["valid"], instructions: [3] },
+        ],
+      },
+    });
+
+    expect(container.querySelector('[role="alert"]')?.textContent).toBe(
+      "recipes.scaledResultInvalid",
+    );
+    expect(fixture.queryEnabled).toEqual([false]);
   });
 });
