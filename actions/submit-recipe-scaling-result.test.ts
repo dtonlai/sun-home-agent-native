@@ -2,6 +2,7 @@ import { rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import { withMigrationRuntime } from "@agent-native/core/db";
 import { createThread, runWithRequestContext } from "@agent-native/core/server";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
@@ -74,8 +75,11 @@ beforeAll(async () => {
   const dbModule = await import("../server/db/index.js");
   getDb = dbModule.getDb;
   schema = dbModule.schema;
-  const plugin = (await import("../server/plugins/db.js")).default;
-  await plugin(undefined as never);
+  const database = await import("../server/plugins/db.js");
+  await withMigrationRuntime(async () => {
+    await database.runContentMigrations(null);
+    await database.runContentSourceMigrations(null);
+  });
   await createThread(OWNER, { id: THREAD_ID });
 }, 60_000);
 
@@ -166,6 +170,86 @@ describe("submit-recipe-scaling-result", () => {
     }
   });
 
+  it("accepts grouped-only content and preserves named one-sided groups", async () => {
+    const result = await callResult({
+      ...INPUT,
+      recipe: {
+        ...INPUT.recipe,
+        ingredientLines: [],
+        instructions: [],
+        components: [
+          {
+            name: " Sauce ",
+            ingredientLines: ["  2 tbsp soy sauce  "],
+            instructions: ["  Mix the sauce.  "],
+          },
+          {
+            name: "Garnish",
+            ingredientLines: ["  1 scallion  "],
+            instructions: [],
+          },
+          {
+            name: "Serving",
+            ingredientLines: [],
+            instructions: ["  Spoon over rice.  "],
+          },
+        ],
+      },
+    });
+
+    expect(result.recipe).toMatchObject({
+      ingredientLines: [],
+      instructions: [],
+      components: [
+        {
+          name: "Sauce",
+          ingredientLines: ["2 tbsp soy sauce"],
+          instructions: ["Mix the sauce."],
+        },
+        {
+          name: "Garnish",
+          ingredientLines: ["1 scallion"],
+          instructions: [],
+        },
+        {
+          name: "Serving",
+          ingredientLines: [],
+          instructions: ["Spoon over rice."],
+        },
+      ],
+    });
+  });
+
+  it("accepts mixed flat and grouped content", async () => {
+    const result = await callResult({
+      ...INPUT,
+      recipe: {
+        ...INPUT.recipe,
+        ingredientLines: ["  1 pinch salt  "],
+        instructions: ["  Serve immediately.  "],
+        components: [
+          {
+            name: "Dressing",
+            ingredientLines: ["  2 tbsp oil  "],
+            instructions: ["  Whisk until combined.  "],
+          },
+        ],
+      },
+    });
+
+    expect(result.recipe).toMatchObject({
+      ingredientLines: ["1 pinch salt"],
+      instructions: ["Serve immediately."],
+      components: [
+        {
+          name: "Dressing",
+          ingredientLines: ["2 tbsp oil"],
+          instructions: ["Whisk until combined."],
+        },
+      ],
+    });
+  });
+
   it("does not consume when schema validation fails", async () => {
     await expect(
       callResult({ ...INPUT, recipe: { ...INPUT.recipe, servings: 6 } }),
@@ -219,6 +303,123 @@ describe("submit-recipe-scaling-result", () => {
       action.schema.safeParse({
         ...INPUT,
         recipe: { ...INPUT.recipe, instructions: ["x".repeat(2_001)] },
+      }).success,
+    ).toBe(false);
+  });
+
+  it("rejects malformed or over-limit component groups", () => {
+    const safeParseRecipe = (recipe: Record<string, unknown>) =>
+      action.schema.safeParse({ ...INPUT, recipe });
+
+    expect(
+      safeParseRecipe({
+        ...INPUT.recipe,
+        components: [{ name: "Sauce", ingredientLines: ["oil"] }],
+      }).success,
+    ).toBe(false);
+    expect(
+      safeParseRecipe({
+        ...INPUT.recipe,
+        instructions: [],
+        components: [
+          { name: "Sauce", ingredientLines: ["oil"], instructions: [] },
+        ],
+      }).success,
+    ).toBe(false);
+    expect(
+      safeParseRecipe({
+        ...INPUT.recipe,
+        ingredientLines: [],
+        components: [
+          { name: "Sauce", ingredientLines: [], instructions: ["Mix."] },
+        ],
+      }).success,
+    ).toBe(false);
+    expect(
+      safeParseRecipe({
+        ...INPUT.recipe,
+        components: [
+          {
+            name: "Sauce",
+            ingredientLines: ["i".repeat(301)],
+            instructions: ["Mix."],
+          },
+        ],
+      }).success,
+    ).toBe(false);
+    expect(
+      safeParseRecipe({
+        ...INPUT.recipe,
+        components: [
+          {
+            name: "Sauce",
+            ingredientLines: ["oil"],
+            instructions: ["x".repeat(2_001)],
+          },
+        ],
+      }).success,
+    ).toBe(false);
+    expect(
+      safeParseRecipe({
+        ...INPUT.recipe,
+        components: [
+          {
+            name: "Sauce",
+            ingredientLines: ["oil"],
+            instructions: ["Mix."],
+            unexpected: true,
+          },
+        ],
+      }).success,
+    ).toBe(false);
+    expect(
+      safeParseRecipe({
+        ...INPUT.recipe,
+        components: Array.from({ length: 21 }, (_, index) => ({
+          name: `Component ${index}`,
+          ingredientLines: ["oil"],
+          instructions: ["Mix."],
+        })),
+      }).success,
+    ).toBe(false);
+    expect(
+      safeParseRecipe({
+        ...INPUT.recipe,
+        ingredientLines: Array(100).fill("oil"),
+        components: [
+          { name: "Sauce", ingredientLines: ["vinegar"], instructions: [] },
+        ],
+      }).success,
+    ).toBe(false);
+    expect(
+      safeParseRecipe({
+        ...INPUT.recipe,
+        instructions: Array(100).fill("Mix."),
+        components: [
+          { name: "Sauce", ingredientLines: [], instructions: ["Serve."] },
+        ],
+      }).success,
+    ).toBe(false);
+    expect(
+      safeParseRecipe({
+        ...INPUT.recipe,
+        ingredientLines: ["oil"],
+        instructions: [],
+        components: [
+          {
+            name: "Sauce",
+            ingredientLines: [],
+            instructions: Array(20).fill("x".repeat(2_000)),
+          },
+        ],
+      }).success,
+    ).toBe(false);
+    expect(
+      safeParseRecipe({
+        ...INPUT.recipe,
+        ingredientLines: [],
+        instructions: [],
+        components: [{ name: "Empty", ingredientLines: [], instructions: [] }],
       }).success,
     ).toBe(false);
   });
