@@ -19,12 +19,32 @@ git clone https://github.com/dtonlai/sun-home-agent-native.git
 cd sun-home-agent-native
 corepack enable
 pnpm install
+```
+
+Before starting the app, configure the shared PostgreSQL database in an
+untracked `.env.local` file:
+
+```bash
+cp .env.example .env.local
+```
+
+Set `DATABASE_URL` to the Supabase transaction pooler URL and
+`DATABASE_URL_UNPOOLED` to a direct or session connection for migrations. Also
+set `BETTER_AUTH_SECRET` and `BETTER_AUTH_URL=http://localhost:3000`. Local
+startup requires a PostgreSQL `DATABASE_URL` and does not apply migrations.
+
+Run the reviewed migration command once before the first app start, then start
+the app:
+
+```bash
+pnpm migrate:shared
 pnpm dev
 ```
 
-Open the local URL printed by `pnpm dev`. On the Welcome screen, choose
-**Continue as local dev**. No provider key is needed to start the app; connect a
-model separately to use agent responses.
+Open the local URL printed by `pnpm dev` and sign in. The local dev sign-in is
+available; configure Google sign-in for the household accounts as described in
+the [local development guide](docs/local-development.md). No AI provider key is
+needed to start the app; connect a model separately to use agent responses.
 
 For framework and Content behavior, use the version-matched guidance in
 `.agents/skills/` and the [Agent Native Content developer guide](https://www.agent-native.com/docs/template-content-developers/).

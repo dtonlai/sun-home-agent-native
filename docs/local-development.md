@@ -21,36 +21,76 @@ corepack enable
 pnpm install
 ```
 
-## Environment variables
+## Shared Supabase database setup
 
-No environment variables are required to start the local app. You do not need
-to create an environment file or configure an AI provider just to open it.
-Choose **Continue as local dev** on the Welcome screen. To use agent responses,
-connect a model separately in the app.
+Local app runs use the same shared PostgreSQL database as the household. Core
+0.226.0 otherwise falls back to local PGlite when `DATABASE_URL` is absent or
+invalid, so the database plugin now fails before app startup in that case.
+Keep the URL in an untracked `.env.local` file; do not put credentials in the
+repository or a `VITE_` variable.
 
-`.env.example` lists optional integrations for other configurations. For
-example, `DATABASE_URL` is optional for local development, and `GEMINI_API_KEY`
-and `OPENAI_API_KEY` are optional AI provider keys. `BETTER_AUTH_SECRET` is
-required for standalone production deployments, not this local workflow. If
-you configure an optional value, keep it in a local, untracked environment file
-and use a private value from the relevant provider; never commit credentials.
+In Supabase, copy the transaction pooler connection string from **Connect** and
+set it as `DATABASE_URL`. Core's Postgres driver supports the transaction
+pooler for app traffic. Add a direct or session connection as
+`DATABASE_URL_UNPOOLED` for the explicit migration command. The transaction
+pooler does not support prepared statements and is not the migration
+connection. Do not configure `SUN_HOME_AGENT_NATIVE_DATABASE_URL` to point to a
+different database: Core gives that app-specific variable precedence over
+`DATABASE_URL`.
 
-## Check and run
-
-Run the repository's type check from the project root:
+Create `.env.local` from `.env.example`:
 
 ```sh
-pnpm typecheck
+cp .env.example .env.local
 ```
 
-Start the app:
+Then edit `.env.local` and set:
+
+```dotenv
+DATABASE_URL=postgresql://...transaction-pooler-url...
+DATABASE_URL_UNPOOLED=postgresql://...direct-or-session-url...
+BETTER_AUTH_SECRET=<private-random-value>
+BETTER_AUTH_URL=http://localhost:3000
+```
+
+For Better Auth, generate a private `BETTER_AUTH_SECRET` (for example,
+`openssl rand -hex 32`). Local development can use Core's **Continue as local
+dev** sign-in. To test the two household Google accounts, create/configure a
+Google OAuth client with the local origin and callback
+`http://localhost:3000/_agent-native/auth/ba/callback/google`, then add its
+identity-only credentials as `GOOGLE_SIGN_IN_CLIENT_ID` and
+`GOOGLE_SIGN_IN_CLIENT_SECRET`. Both household members must sign in separately;
+Content sharing permissions still govern access. Do not set `AUTH_DISABLED`
+for household testing because it runs requests as one shared user.
+
+## Login, migration, and startup
+
+Install dependencies, then run the explicit migration command once before
+starting against a database that has not yet been prepared:
 
 ```sh
+pnpm install
+pnpm migrate:shared
 pnpm dev
 ```
 
-Open the local URL printed by the command. On the Welcome screen, choose
-**Continue as local dev**. Stop the server with `Ctrl+C` when finished.
+`migrate:shared` runs Core 0.226.0 framework release migrations, Creative
+Context migrations, and the Content and Content-source migration lists inside
+Core's `withMigrationRuntime()`. Core selects `DATABASE_URL_UNPOOLED` (or the
+app-prefixed unpooled equivalent) for the migration connection when set; the
+command validates both the runtime and migration targets as PostgreSQL before
+connecting. Do not run `drizzle-kit push`: this app's reviewed handwritten
+Content migration lists are the schema owner. Application startup runs no
+schema migrations or database repairs. A pending or missing schema is fixed
+by reviewing and explicitly running the migration command, not by restarting
+the app.
 
-The command names above are defined in `package.json`; the app setup and local
-Welcome-screen flow are described in the repository README.
+Open the local URL printed by `pnpm dev` and sign in with the selected local or
+Google account. Stop the server with `Ctrl+C` when finished. To roll back an
+application change, stop local runs and return to the prior reviewed commit.
+Migrations are additive and have no automatic down path; if a migration has
+already changed shared data, use the Supabase backup or point-in-time recovery
+process approved by the database owner. Do not manually drop or edit tables.
+
+The optional AI provider keys in `.env.example` are not required for startup.
+All secrets stay in `.env.local`, which is ignored by Git.

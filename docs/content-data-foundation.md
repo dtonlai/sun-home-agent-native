@@ -17,12 +17,14 @@ The schema has no Recipes-specific document table. A recipe should remain a
 normal Content page and Recipes should keep a reference to its Content document
 ID, not a second copy of the recipe body.
 
-The local default is Core's in-process PGlite PostgreSQL database at
-`pglite:./data/pglite`, which resolves to the app-root `data/pglite` directory.
-This applies when no usable `DATABASE_URL` or supported app/provider database
-URL is configured. PGlite is local development storage; deployed/shared use
-needs persistent hosted PostgreSQL. The package includes `@electric-sql/pglite`
-and `.gitignore` excludes `**/data/`.
+Core 0.226.0's database client normally falls back to in-process PGlite at
+`pglite:./data/pglite` when no usable URL is configured. B1-T01 deliberately
+disables that fallback at this app's local startup boundary: manual local runs
+must provide `DATABASE_URL` with a PostgreSQL URL for the shared database.
+`SUN_HOME_AGENT_NATIVE_DATABASE_URL`, which Core prioritizes over
+`DATABASE_URL`, must be unset or match it. `@electric-sql/pglite` remains a
+dependency for isolated tests; it is not a local app state store for this
+workflow.
 
 App wiring:
 
@@ -31,25 +33,36 @@ App wiring:
 - `server/db/index.ts` calls `createGetDb(schema)` and registers documents as
   shareable/searchable Content resources.
 - `server/plugins/db.ts` owns the app's handwritten Content migrations:
-  `content_migrations` (through version 134) and the separate
-  `content_source_migrations` ledger (through version 5). Its default Nitro
-  plugin awaits both lists during local app startup.
+  `content_migrations` (through version 135) and the separate
+  `content_source_migrations` ledger (through version 5). The default Nitro
+  plugin validates the local PostgreSQL URL and intentionally performs no
+  migration or startup maintenance.
+- `server/lib/startup-maintenance.ts` still contains additive-column checks and
+  legacy data repairs, but the local startup plugin no longer schedules them.
+  Any needed legacy repair must get a separately reviewed explicit procedure;
+  none is run by B1-T01.
 - `drizzle.config.ts` delegates to Core's `createDrizzleConfig()` for the
   repository's Drizzle schema/migration tooling configuration.
 
 ## Migration commands and hosted PostgreSQL
 
-- **Local startup:** `pnpm dev` runs `agent-native dev --inspect`; the Content
-  Nitro plugin applies pending Content/source migrations on startup using the
-  same configured database. Core's default database URL is PGlite when no
-  hosted URL is set. No migration or server command was run for this audit.
+- **Local startup:** `pnpm dev` runs `agent-native dev --inspect`. Local startup
+  now fails clearly if `DATABASE_URL` is missing, invalid, or non-PostgreSQL.
+  It does not apply Content/source migrations, additive-column ensures, or
+  startup data repairs. This prevents an app restart from changing an
+  unreviewed shared schema.
 - **Release/production:** `pnpm migrate:production` is the explicit script in
   `package.json`. `scripts/migrate-production.ts` loads the release environment
   and runs Core framework release migrations, Creative Context migrations,
   Content migrations, and Content source migrations, then closes the DB
-  executor. Production migration execution remains a deliberate reviewed
-  release step requiring the applicable product-owner approval; it is not a
-  build step.
+  executor. It runs inside Core 0.226.0's `withMigrationRuntime()` and validates
+  that both the configured runtime `DATABASE_URL` and Core's selected migration
+  URL are PostgreSQL before connecting. `pnpm migrate:shared` is the local
+  shared-database alias for the same reviewable operation. The migration URL
+  comes from `DATABASE_URL_UNPOOLED` (or its app-prefixed counterpart) when
+  configured, so use a direct or session connection for migrations if the
+  runtime URL is Supabase's transaction pooler. Migration execution remains a
+  deliberate reviewed step; it is not a build or startup side effect.
 - `pnpm dev:database` is a local environment helper that updates `.env.local`
   and starts dev; it is not a separate schema migration command. Although
   `drizzle.config.ts` and `drizzle-kit` are present, this package has no
@@ -59,15 +72,13 @@ App wiring:
   Never use `drizzle-kit push` against production.
 
 For Supabase, Core's installed `docs/content/supabase.mdx` says to copy a
-PostgreSQL URL from Supabase Connect and supply it to the server environment.
-Use Supabase's transaction pooler for short-lived serverless runtime requests;
-it does not support prepared statements. Use a direct or session connection
-for release migrations. If runtime and migration traffic use different
-connection modes, supply the appropriate URL to each environment. Required
-prerequisites are a provisioned PostgreSQL database, server-side connection
-credentials, and the approved release migration step; no Supabase account,
-database, URL, or credentials are configured or verified by this audit. Keep
-credentials out of source and client configuration.
+PostgreSQL URL from Supabase Connect. Use its transaction pooler for app
+runtime traffic, and supply a direct or session connection as
+`DATABASE_URL_UNPOOLED` for explicit migrations. Transaction pooling does not
+support prepared statements. The local owner workflow, Better Auth variables,
+login steps, and recovery guidance are in `docs/local-development.md`. No
+Supabase account, database, URL, credentials, or migration was contacted or
+used by B1-T01; all validation must use isolated disposable test databases.
 
 ## Recipes read contract
 
@@ -174,12 +185,29 @@ Content actions completed; no watcher or OS settings were changed.
   `node_modules/@agent-native/core/docs/content/supabase.mdx`, and
   `node_modules/@agent-native/core/docs/content/template-content-developers.mdx`.
 - Runtime/schema/migration source: `node_modules/@agent-native/core/dist/db/
-  client.js`, `server/db/schema.ts`, `server/db/index.ts`,
-  `server/plugins/db.ts`, `scripts/migrate-production.ts`,
-  `drizzle.config.ts`, `package.json`, and `.gitignore`.
+-  client.js`, `migration-runtime.js`, `migrations.js`,
+  `migration-policy.js`, `server/release-migrations.js`, the bundled
+  `docs/content/server-database.mdx` and `docs/content/supabase.mdx`,
+  `server/db/schema.ts`, `server/db/index.ts`, `server/plugins/db.ts`,
+  `scripts/migrate-production.ts`, `drizzle.config.ts`, `package.json`, and
+  `.gitignore`.
 - Read API source: `actions/list-documents.ts`,
   `actions/_document-discovery-query.ts`, and `actions/get-document.ts`.
 - Discovery commands were `pnpm action framework-search --pattern "PGlite"
   --scope docs`, `--pattern "runMigrations" --scope docs`, and
   `--pattern "list-documents" --scope source`; focused source reads then
   verified the exact code paths and schemas above.
+
+For B1-T01, the same Core 0.226.0 package source confirms that
+`getRuntimeDatabaseUrl()` checks an app-prefixed URL, then `DATABASE_URL`, then
+`NETLIFY_DATABASE_URL`, and accepts a caller-supplied fallback. The generated
+Content app passes `pglite:./data/pglite` as that fallback. Core's
+`getMigrationDatabaseUrl()` prefers the configured unpooled URL before the
+runtime URL, and `withMigrationRuntime()` is the supported migration
+authorization wrapper. `runMigrations()` only defers startup migrations for a
+hosted serverless request when release migrations are configured; a manual
+local Node dev run would apply pending entries from the app plugin. The app
+now checks its explicit PostgreSQL `DATABASE_URL` before local startup and
+does not invoke migrations or startup maintenance there. The explicit
+`migrate:shared`/`migrate:production` script preflights both URLs and retains
+the framework release migration sequence.

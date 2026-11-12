@@ -3,9 +3,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { createDbExec } from "@agent-native/core/db";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import * as schema from "../db/schema";
+import { assertPostgresUrl, assertSharedPostgresDatabaseUrl } from "./db";
 
 /**
  * Regression guard mirroring templates/analytics/server/plugins/db.spec.ts:
@@ -59,6 +60,67 @@ describe("content db migrations cover every schema.ts column", () => {
       expect(missing).toEqual([]);
     });
   }
+});
+
+describe("shared PostgreSQL database configuration", () => {
+  it("requires an explicit DATABASE_URL", () => {
+    expect(() => assertSharedPostgresDatabaseUrl({})).toThrow(
+      /DATABASE_URL is required.*PGlite fallback is disabled/i,
+    );
+  });
+
+  it.each(["pglite:/tmp/local-db", "sqlite:///tmp/local.db", "not a url"])(
+    "rejects non-PostgreSQL DATABASE_URL values: %s",
+    (databaseUrl) => {
+      expect(() =>
+        assertSharedPostgresDatabaseUrl({ DATABASE_URL: databaseUrl }),
+      ).toThrow(/DATABASE_URL must be a PostgreSQL connection URL/i);
+    },
+  );
+
+  it.each([
+    "postgres://user:password@db.example.test:5432/app",
+    "postgresql://user:password@db.example.test:5432/app",
+  ])("accepts PostgreSQL URLs: %s", (databaseUrl) => {
+    expect(assertSharedPostgresDatabaseUrl({ DATABASE_URL: databaseUrl })).toBe(
+      databaseUrl,
+    );
+  });
+
+  it("rejects an app-specific URL that would override DATABASE_URL", () => {
+    vi.stubEnv("APP_NAME", "sun-home-agent-native");
+    try {
+      expect(() =>
+        assertSharedPostgresDatabaseUrl({
+          DATABASE_URL: "postgres://shared.example.test/app",
+          SUN_HOME_AGENT_NATIVE_DATABASE_URL:
+            "postgres://different.example.test/app",
+        }),
+      ).toThrow(/must match DATABASE_URL/i);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("rejects a PostgreSQL URL without a hostname", () => {
+    expect(() =>
+      assertPostgresUrl("postgres://", "Migration database URL"),
+    ).toThrow(/must include a PostgreSQL host/i);
+  });
+});
+
+describe("local startup migration policy", () => {
+  const startupPluginSource = dbTsSource.slice(
+    dbTsSource.lastIndexOf(
+      "export default async function contentDatabasePlugin",
+    ),
+  );
+
+  it("does not run migrations or database maintenance during startup", () => {
+    expect(startupPluginSource).not.toMatch(/runContentMigrations\s*\(/);
+    expect(startupPluginSource).not.toMatch(/runContentSourceMigrations\s*\(/);
+    expect(startupPluginSource).not.toMatch(/scheduleStartupMaintenance\s*\(/);
+  });
 });
 
 /**
@@ -263,27 +325,24 @@ describe("content db.ts schedules post-boot maintenance after runMigrations", ()
     expect(maintenanceSource).toContain("ensureAdditiveColumns({");
   });
 
-  it("schedules maintenance only after both migration runners are awaited", () => {
-    const contentMigrationsCallIdx = dbTsSource.indexOf(
-      "runContentMigrations(",
+  it("keeps migrations and maintenance out of app startup", () => {
+    const startupPluginSource = dbTsSource.slice(
+      dbTsSource.lastIndexOf(
+        "export default async function contentDatabasePlugin",
+      ),
     );
-    const sourceMigrationsCallIdx = dbTsSource.indexOf(
-      "runContentSourceMigrations(",
-    );
-    const scheduleCallIdx = dbTsSource.indexOf(
-      "void scheduleStartupMaintenance();",
-    );
-    expect(contentMigrationsCallIdx).toBeGreaterThan(-1);
-    expect(sourceMigrationsCallIdx).toBeGreaterThan(-1);
-    expect(scheduleCallIdx).toBeGreaterThan(-1);
-    expect(scheduleCallIdx).toBeGreaterThan(contentMigrationsCallIdx);
-    expect(scheduleCallIdx).toBeGreaterThan(sourceMigrationsCallIdx);
+    expect(startupPluginSource).not.toMatch(/runContentMigrations\s*\(/);
+    expect(startupPluginSource).not.toMatch(/runContentSourceMigrations\s*\(/);
+    expect(startupPluginSource).not.toMatch(/scheduleStartupMaintenance\s*\(/);
+  });
 
-    // Both migration plugin functions must be awaited before the scheduler
-    // is called, not just textually after it — and the scheduler itself must
-    // NOT be awaited (boot no longer pays for the net or the repairs).
-    expect(dbTsSource).toMatch(
-      /await\s+runContentMigrations\([^)]*\)[\s\S]*?await\s+runContentSourceMigrations\([^)]*\)[\s\S]*?void\s+scheduleStartupMaintenance\(\);/,
+  it("runs framework and app migrations inside Core's explicit migration runtime", () => {
+    const migrationScriptSource = readFileSync(
+      new URL("../../scripts/migrate-production.ts", import.meta.url),
+      "utf8",
+    );
+    expect(migrationScriptSource).toMatch(
+      /withMigrationRuntime\(async\s*\(\)\s*=>\s*\{[\s\S]*?await runFrameworkReleaseMigrations\(null\);[\s\S]*?await creativeContextDbPlugin\(null\);[\s\S]*?await runContentMigrations\(null\);[\s\S]*?await runContentSourceMigrations\(null\);/,
     );
   });
 
