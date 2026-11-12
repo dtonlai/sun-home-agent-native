@@ -1,7 +1,8 @@
 # Recipe format and scaling-result contract proposal
 
-**Status:** Proposal for Michael's review. This note defines no implemented
-parser or action contract. Canonical recipes remain ordinary Content pages.
+**Status:** Michael approved the additive grouped scaling-result schema
+extension for implementation in B1-T02. The parser and renderer proposals
+remain unimplemented. Canonical recipes remain ordinary Content pages.
 
 ## Source-page reading model
 
@@ -58,7 +59,8 @@ filtering, or search; those remain a separate product decision.
 
 ## Mapping to the current scale-result action
 
-`submit-recipe-scaling-result` currently accepts a flat `recipe` with
+Before the approved extension, `submit-recipe-scaling-result` accepted a flat
+`recipe` with
 `servings`, `ingredientLines`, `instructions`, and `adjustmentExplanations`.
 Its result renderer displays one flat ingredient list and one flat instruction
 list. The `servings` field is already a string, so a value like `2-3 servings`
