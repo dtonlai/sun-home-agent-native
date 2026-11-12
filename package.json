@@ -16,6 +16,7 @@
     "eval:search": "vitest run evals/search-relevance",
     "format.fix": "oxfmt --write .",
     "typecheck": "agent-native typecheck",
+    "migrate:shared": "tsx scripts/migrate-production.ts",
     "migrate:production": "tsx scripts/migrate-production.ts",
     "action": "agent-native action",
     "script": "agent-native script",

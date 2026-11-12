@@ -1,8 +1,66 @@
+import { getAppConfig } from "@agent-native/core/app-config";
 import { runMigrations } from "@agent-native/core/db";
 import { searchIndexMigration } from "@agent-native/core/search";
 
 import { documentSearchIndex } from "../db/index.js";
-import { scheduleStartupMaintenance } from "../lib/startup-maintenance.js";
+
+/**
+ * Local app runs must use the explicitly configured shared PostgreSQL URL.
+ * Core 0.226.0 otherwise resolves an absent or invalid URL to its local PGlite
+ * fallback. Keep this check at the startup boundary, before any app plugin can
+ * touch the database.
+ */
+export function assertSharedPostgresDatabaseUrl(
+  env: NodeJS.ProcessEnv = process.env,
+): string {
+  const databaseUrl = env.DATABASE_URL?.trim();
+  if (!databaseUrl) {
+    throw new Error(
+      "DATABASE_URL is required for local app runs. Configure the shared PostgreSQL URL before starting Sun Home; local PGlite fallback is disabled.",
+    );
+  }
+
+  assertPostgresUrl(databaseUrl, "DATABASE_URL");
+
+  // Core resolves this app-specific variable before DATABASE_URL. Refuse a
+  // second runtime URL so every app state store is guaranteed to use the
+  // explicitly configured shared database.
+  const app = getAppConfig().app;
+  const appName = app.workspaceId || app.name;
+  const appPrefix = appName?.toUpperCase().replace(/-/g, "_");
+  const appDatabaseUrl = appPrefix
+    ? env[`${appPrefix}_DATABASE_URL`]?.trim()
+    : undefined;
+  if (appDatabaseUrl && appDatabaseUrl !== databaseUrl) {
+    throw new Error(
+      `${appPrefix}_DATABASE_URL must match DATABASE_URL. Remove the app-specific override so all app state uses the configured shared PostgreSQL database.`,
+    );
+  }
+
+  return databaseUrl;
+}
+
+export function assertPostgresUrl(
+  value: string | undefined,
+  label: string,
+): string {
+  if (!value || !/^postgres(?:ql)?:\/\//i.test(value)) {
+    throw new Error(`${label} must be a PostgreSQL connection URL.`);
+  }
+
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new Error(`${label} must be a valid PostgreSQL connection URL.`);
+  }
+
+  if (!url.hostname) {
+    throw new Error(`${label} must include a PostgreSQL host.`);
+  }
+
+  return value;
+}
 
 // Convention: every new migration below MUST set a unique `name:` slug (see
 // packages/core/src/db/migrations.ts for the full rationale). Version numbers
@@ -1708,17 +1766,18 @@ export const runContentSourceMigrations = runMigrations(
 
 /**
  * The migration lists above are the authoritative source for tables, indexes,
- * and data transforms. Boot awaits only them. `ensureAdditiveColumns` and the
- * one-time data repairs moved to server/lib/startup-maintenance.ts, which
- * schedules them once per isolate right after boot instead of blocking the
- * first response — steady-state boots no longer pay for a schema probe and
- * repairs that are usually no-ops. Failures there log loudly and retry; they
- * are never silently dropped.
+ * and data transforms. The explicit migration command runs these lists.
+ * Startup schema ensures and data repairs are intentionally not scheduled
+ * against the shared database during app boot.
  */
 export default async function contentDatabasePlugin(
-  nitroApp: Parameters<typeof runContentMigrations>[0],
+  _nitroApp: Parameters<typeof runContentMigrations>[0],
 ) {
-  await runContentMigrations(nitroApp);
-  await runContentSourceMigrations(nitroApp);
-  void scheduleStartupMaintenance();
+  if (process.env.NODE_ENV !== "production") {
+    assertSharedPostgresDatabaseUrl();
+  }
+
+  // Schema changes are release operations. The startup maintenance helper
+  // also includes one-time data repairs, so it is not scheduled here; those
+  // repairs require their own reviewed explicit path before use.
 }
