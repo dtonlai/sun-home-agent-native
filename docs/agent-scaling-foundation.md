@@ -140,15 +140,18 @@ uses AI SDK 7 and Zod 4. This task therefore adds adapter `^3.1.0`. No provider
 key is needed to confirm the package version and picker filtering logic, and no
 credential or provider request was used.
 
-The package/lockfile change is reproducible with `pnpm install --frozen-lockfile`
-at the lockfile level. A full local install could not be completed in this
-sandbox: pnpm failed while linking the existing dependency tree with `ENOENT`,
-then an offline retry failed reading a package-store file with `EBADF`. The
-preexisting dependencies were moved into `node_modules/.ignored` by pnpm during
-the failed install. Runtime package registration and a live chat/provider check
-remain unverified until dependencies can be installed successfully. No app
-configuration or `server/plugins/agent-chat.ts` change is indicated by the
-source evidence.
+The reproducible lockfile check is
+`pnpm install --lockfile-only --frozen-lockfile --ignore-scripts`; it completed
+successfully with pnpm 10.14.0 (`Done in 508ms`, exit 0). A full local install
+could not be completed: `pnpm add @openrouter/ai-sdk-provider@^2.9.1` failed
+linking with `ENOENT` for a package-store file; an offline retry of
+`pnpm install --offline --frozen-lockfile --ignore-scripts` failed with `EBADF`
+reading a package-store file. Inspecting the store with `pnpm store status`
+also reports `ENOENT` for a missing index entry. The preexisting dependencies
+were moved into `node_modules/.ignored` by pnpm during the failed install.
+Runtime package registration and a live chat/provider check remain unverified
+until the damaged store is repaired. No app configuration or
+`server/plugins/agent-chat.ts` change is indicated by the source evidence.
 
 ## Evidence consulted
 
