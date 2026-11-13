@@ -119,6 +119,67 @@ handled for this audit.
   scoped scale turn. Keep original/scaled comparison and mobile behavior as a
   separate UI acceptance check.
 
+## OpenRouter chat setup finding (2026-11-13)
+
+This checkout uses Core 0.226.0 and `ai` 7.x. Core's
+`dist/agent/engine/ai-sdk-engine.js` loads `@openrouter/ai-sdk-provider`
+dynamically and marks the OpenRouter engine as not installed when that
+optional package is absent. `dist/client/chat-model-groups.js` filters out
+engines with `packageInstalled === false`; therefore, the absent adapter
+explains both the reported engine error and why OpenRouter models do not appear
+in chat. This is upstream behavior, not a missing app model list or an
+app-owned setting. Adding the supported adapter registers the engine and
+exposes Core's built-in OpenRouter recommended model catalog. The chat picker
+then shows that group only when the provider is configured (or is the current
+engine), consistent with Core's setup flow.
+
+The installed Core Chat template declares adapter 2.x alongside AI SDK 6.x,
+while this app already uses AI SDK 7.x. Registry metadata confirms adapter
+3.1.0 has peer requirements `ai ^7.0.0` and `zod ^3.25.76 || ^4.1.8`; the app
+uses AI SDK 7 and Zod 4. This task therefore adds adapter `^3.1.0`. No provider
+key is needed to confirm the package version and picker filtering logic, and no
+credential or provider request was used.
+
+The reproducible lockfile check
+`pnpm install --lockfile-only --frozen-lockfile --ignore-scripts` completed
+with pnpm 10.14.0 (`Done in 518ms`, exit 0). The original store is damaged:
+`pnpm add @openrouter/ai-sdk-provider@^2.9.1` failed with `ERR_PNPM_ENOENT`
+while linking a Vitest package from a missing store file;
+`pnpm install --offline --frozen-lockfile --ignore-scripts` failed with
+`ERR_PNPM_EBADF` while reading another store file; `pnpm store status` reported
+`ENOENT` for a missing `@esbuild/aix-ppc64@0.25.12` store index. Those attempts
+moved preexisting dependencies into `node_modules/.ignored`.
+
+Runtime package recognition was then verified in a detached temporary worktree
+with a separate store, without starting the app server:
+
+- From `/tmp/dwight-b1-t05-verify`,
+  `pnpm install --frozen-lockfile --ignore-scripts --store-dir /tmp/b1-t05-isolated-pnpm-store`
+  exited 0 (`resolved 904, reused 904, added 904`; done in 4s).
+- This Core registry check exited 0:
+
+  ```sh
+  node --input-type=module -e 'import { registerBuiltinEngines, getAgentEngineEntry, isAgentEnginePackageInstalled } from "@agent-native/core/agent/engine"; registerBuiltinEngines(); const entry = getAgentEngineEntry("ai-sdk:openrouter"); if (!entry) throw new Error("Core did not register ai-sdk:openrouter"); const installed = isAgentEnginePackageInstalled(entry); console.log(JSON.stringify({engine: entry.name, installPackage: entry.installPackage, packageInstalled: installed})); if (!installed) process.exit(1);'
+  ```
+
+  Output: `{"engine":"ai-sdk:openrouter","installPackage":"ai @openrouter/ai-sdk-provider","packageInstalled":true}`.
+- Core engine resolution itself also exited 0:
+
+  ```sh
+  node --input-type=module -e 'import { registerBuiltinEngines, resolveEngine } from "@agent-native/core/agent/engine"; registerBuiltinEngines(); const engine = await resolveEngine({ engineOption: "ai-sdk:openrouter", apiKey: "verification-placeholder" }); console.log(JSON.stringify({name: engine.name, label: engine.label, defaultModel: engine.defaultModel}));'
+  ```
+
+  Output: `{"name":"ai-sdk:openrouter","label":"Openrouter (AI SDK)","defaultModel":"openai/gpt-6-luna"}`. This exercises Core's engine resolution check that previously threw the reported missing optional package error.
+- A direct adapter smoke check imported `createOpenRouter`, constructed the
+  DeepSeek Flash model object using a verification placeholder key, and exited
+  0. It made no provider request and used no credential.
+
+The successful Core registry check confirms the missing-optional-packages gate
+is cleared with the declared adapter. Placeholder keys were used only to build
+local objects; no provider request or authenticated chat was made. No app
+configuration or `server/plugins/agent-chat.ts` change is indicated by the
+source evidence.
+
 ## Evidence consulted
 
 - Installed Core version: `node_modules/@agent-native/core/package.json`
@@ -140,6 +201,11 @@ handled for this audit.
   `dist/secrets/register-framework-secrets.js`, and
   `dist/server/credential-provider.js`; client handoff fields are typed in
   `dist/client/agent-chat.d.ts`.
+- OpenRouter dependency and chat visibility: Core 0.226.0's
+  `dist/templates/chat/package.json`, `dist/agent/engine/ai-sdk-engine.js`,
+  `dist/client/chat-model-groups.js`, `dist/agent/model-config.js`, and
+  `dist/scripts/agent-engines/list-agent-engines.js`; npm registry peer
+  metadata for `@openrouter/ai-sdk-provider` 3.1.0.
 - Requested local skills: `.agents/skills/agent-native-docs/SKILL.md`,
   `.agents/skills/delegate-to-agent/SKILL.md`,
   `.agents/skills/actions/SKILL.md`, `.agents/skills/secrets/SKILL.md`,
