@@ -369,8 +369,7 @@ export function RecipesLibrary() {
   const selectedDocument =
     documentQuery.data?.id === selectedRecipeId &&
     documentQuery.data?.spaceId === activeSpace?.id &&
-    !documentQuery.data?.database &&
-    !documentQuery.data?.databaseMembership
+    !documentQuery.data?.database
       ? documentQuery.data
       : undefined;
   const listLoaded = pageState?.spaceId === activeSpace?.id;

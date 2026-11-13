@@ -344,6 +344,23 @@ describe("Recipes library", () => {
     });
   });
 
+  it("renders a listed ordinary page that also has database membership metadata", () => {
+    setupSelectedRecipe();
+    fixture.document.data = {
+      id: "recipe-stable-id",
+      spaceId: "caller-space-id",
+      title: "Tomato Soup",
+      content: "## Ingredients\n- 4 tomatoes",
+      databaseMembership: { databaseId: "meal-plans" },
+    };
+
+    render(root);
+
+    expect(container.textContent).toContain("Tomato Soup");
+    expect(container.textContent).toContain("4 tomatoes");
+    expect(container.textContent).not.toContain("recipes.recipeUnavailable");
+  });
+
   it("loads a deep-link recipe directly without scanning later list pages", () => {
     fixture.search = "?spaceId=caller-space-id&recipeId=deep-linked-id";
     fixture.spaces.data = {
