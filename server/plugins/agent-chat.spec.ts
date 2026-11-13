@@ -76,24 +76,15 @@ describe("Content agent chat plugin", () => {
     );
   });
 
-  it("requires scoped recipe scaling to read the source and submit its validated result", async () => {
+  it("does not require the scaling result action to complete a scoped chat request", async () => {
     await import("./agent-chat.js");
 
     const options = mocks.createAgentChatPlugin.mock.calls[0]?.[0] as {
       systemPrompt?: string;
     };
 
-    expect(options.systemPrompt).toContain(
-      "For a scoped recipe scaling request",
-    );
-    expect(options.systemPrompt).toContain(
-      "Call get-document with that exact documentId",
-    );
-    expect(options.systemPrompt).toContain(
-      "Call submit-recipe-scaling-result with the action's full validated schema",
-    );
-    expect(options.systemPrompt).toContain(
-      "Do not report that scaling is validated or the comparison is complete unless submit-recipe-scaling-result succeeds",
+    expect(options.systemPrompt).not.toContain(
+      "submit-recipe-scaling-result",
     );
   });
 
