@@ -131,6 +131,26 @@ function render(root: Root) {
   act(() => root.render(<RecipesLibrary />));
 }
 
+function setValue(
+  element: HTMLInputElement | HTMLSelectElement,
+  value: string,
+) {
+  act(() => {
+    const prototype =
+      element instanceof HTMLSelectElement
+        ? HTMLSelectElement.prototype
+        : HTMLInputElement.prototype;
+    const setter = Object.getOwnPropertyDescriptor(prototype, "value")?.set;
+    setter?.call(element, value);
+    element.dispatchEvent(new Event("input", { bubbles: true }));
+    element.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+}
+
+function clickButton(button: HTMLButtonElement | undefined) {
+  act(() => button?.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+}
+
 function setupSelectedRecipe() {
   fixture.search = "?spaceId=caller-space-id&recipeId=recipe-stable-id";
   fixture.spaces.data = {
@@ -161,6 +181,7 @@ describe("Recipes library", () => {
   let root: Root;
 
   beforeEach(() => {
+    vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
     fixture.spaces.data = { spaces: [] };
     fixture.spaces.isLoading = false;
     fixture.spaces.isError = false;
@@ -192,6 +213,7 @@ describe("Recipes library", () => {
   afterEach(() => {
     act(() => root.unmount());
     container.remove();
+    vi.unstubAllGlobals();
   });
 
   it("shows setup guidance without provisioning a Recipes space", () => {
@@ -260,6 +282,98 @@ describe("Recipes library", () => {
       spaceId: "caller-space-id",
       documentType: "page",
     });
+  });
+
+  it("filters recipe pages by cuisine and body tags while retaining legacy pages", () => {
+    fixture.spaces.data = {
+      spaces: [{ id: "caller-space-id", name: "Recipes", orgId: null }],
+    };
+    fixture.pages.set(0, {
+      data: {
+        documents: [
+          {
+            id: "soup",
+            title: "Tomato Soup",
+            contentPreview: "Tags: weeknight, vegetarian\nCuisine: Italian",
+          },
+          {
+            id: "bread",
+            title: "Sourdough",
+            contentPreview: "Tags: baking; vegetarian\nCuisine: French",
+          },
+          {
+            id: "legacy",
+            title: "Family Roast",
+            contentPreview: "Ingredients: potatoes\nInstructions: roast",
+          },
+        ],
+        pagination: { hasMore: false, nextOffset: null },
+      },
+      isLoading: false,
+      isError: false,
+      isFetching: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+    render(root);
+
+    const search = container.querySelector<HTMLInputElement>(
+      "#recipe-library-search",
+    )!;
+    setValue(search, "vegetarian");
+    expect(container.querySelector('[href*="recipeId=soup"]')).not.toBeNull();
+    expect(container.querySelector('[href*="recipeId=bread"]')).not.toBeNull();
+    expect(container.querySelector('[href*="recipeId=legacy"]')).toBeNull();
+
+    const cuisine = container.querySelector<HTMLSelectElement>(
+      "#recipe-cuisine-filter",
+    )!;
+    setValue(search, "");
+    setValue(cuisine, "Italian");
+    expect(container.querySelector('[href*="recipeId=soup"]')).not.toBeNull();
+    expect(container.querySelector('[href*="recipeId=bread"]')).toBeNull();
+    expect(container.querySelector('[href*="recipeId=legacy"]')).toBeNull();
+  });
+
+  it("opens the in-shell recipe form when creation is available", () => {
+    fixture.spaces.data = {
+      spaces: [{ id: "caller-space-id", name: "Recipes", orgId: null }],
+    };
+    fixture.pages.set(0, {
+      data: {
+        documents: [],
+        pagination: { hasMore: false, nextOffset: null },
+      },
+      isLoading: false,
+      isError: false,
+      isFetching: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+    act(() =>
+      root.render(
+        <RecipesLibrary
+          createRecipe={async () => ({
+            documentId: "new-recipe",
+            urlPath: "/page/new-recipe",
+          })}
+        />,
+      ),
+    );
+
+    const addRecipe = [...container.querySelectorAll("button")].find(
+      (button) => button.textContent === "recipes.addRecipe",
+    );
+    expect(addRecipe?.disabled).toBe(false);
+    clickButton(addRecipe);
+    expect(container.textContent).toContain("recipes.recipeTitle");
+    expect(container.textContent).toContain("recipes.ingredientGroups");
+
+    const cancel = [...container.querySelectorAll("button")].find(
+      (button) => button.textContent === "recipes.cancel",
+    );
+    clickButton(cancel);
+    expect(container.textContent).not.toContain("recipes.recipeTitle");
   });
 
   it("follows the action pagination when loading more recipes", () => {
@@ -433,7 +547,9 @@ describe("Recipes library", () => {
     setupSelectedRecipe();
     render(root);
 
-    const select = container.querySelector("select");
+    const select = container.querySelector<HTMLSelectElement>(
+      "#recipe-scale-choice",
+    );
     expect(select).not.toBeNull();
     expect(
       [...(select?.querySelectorAll("option") ?? [])].map(
