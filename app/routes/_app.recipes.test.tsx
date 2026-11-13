@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 
-import { act, type ReactNode } from "react";
+import { act, type ComponentType, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -30,6 +30,13 @@ const fixture = vi.hoisted(() => ({
     isPending: false,
   },
   sendCalls: [] as Array<Record<string, unknown>>,
+  chatRun: {
+    isGenerating: false,
+    stopReason: null as "stopped" | null,
+    observedRun: false,
+  },
+  rendererRegistrations: [] as Array<Record<string, unknown>>,
+  toolRendererRegistrations: [] as Array<Record<string, unknown>>,
 }));
 
 vi.mock("@agent-native/core/client/hooks", () => ({
@@ -78,8 +85,31 @@ vi.mock("@agent-native/core/client/hooks", () => ({
 }));
 
 vi.mock("@agent-native/core/client/agent-chat", () => ({
-  sendToAgentChat: (input: Record<string, unknown>) => {
-    fixture.sendCalls.push(input);
+  useAgentChatGenerating: () => [
+    fixture.chatRun.isGenerating,
+    (input: Record<string, unknown>) => {
+      fixture.sendCalls.push(input);
+      fixture.chatRun.isGenerating = true;
+      fixture.chatRun.stopReason = null;
+      fixture.chatRun.observedRun = false;
+      return "tab-1";
+    },
+    fixture.chatRun.stopReason,
+    fixture.chatRun.observedRun,
+  ],
+}));
+
+vi.mock("@agent-native/toolkit/app/chat/agentkit-chat", () => ({
+  registerActionChatRenderer: (registration: Record<string, unknown>) => {
+    fixture.rendererRegistrations.push(registration);
+    return vi.fn();
+  },
+}));
+
+vi.mock("@agent-native/toolkit/app/chat/chat", () => ({
+  registerToolRenderer: (registration: Record<string, unknown>) => {
+    fixture.toolRendererRegistrations.push(registration);
+    return vi.fn();
   },
 }));
 
@@ -184,6 +214,11 @@ describe("Recipes library", () => {
     });
     fixture.scaleMutation.isPending = false;
     fixture.sendCalls = [];
+    fixture.chatRun = {
+      isGenerating: false,
+      stopReason: null,
+      observedRun: false,
+    };
     container = document.createElement("div");
     document.body.appendChild(container);
     root = createRoot(container);
@@ -467,7 +502,7 @@ describe("Recipes library", () => {
       factor: 2,
     });
     expect(fixture.sendCalls).toEqual([
-      {
+      expect.objectContaining({
         message: "recipes.scalingRequest",
         context: JSON.stringify({ documentId: "recipe-stable-id", factor: 2 }),
         actionScope: {
@@ -475,9 +510,114 @@ describe("Recipes library", () => {
           grantToken: "grant-token-with-at-least-forty-characters-1234567890",
         },
         submit: true,
+        submitMessageId: expect.any(String),
         openSidebar: true,
-      },
+      }),
     ]);
+  });
+
+  it("shows in-progress state while the scoped agent run is active", () => {
+    setupSelectedRecipe();
+    render(root);
+
+    const scaleButton = [...container.querySelectorAll("button")].find(
+      (button) => button.textContent?.includes("recipes.scale"),
+    );
+    act(() => {
+      scaleButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    render(root);
+
+    expect(container.textContent).toContain("recipes.scalingInProgress");
+    expect(container.textContent).toContain("recipes.scale");
+  });
+
+  it("shows the comparison only after the completed result action succeeds", async () => {
+    setupSelectedRecipe();
+    render(root);
+    const scaleButton = [...container.querySelectorAll("button")].find(
+      (button) => button.textContent?.includes("recipes.scale"),
+    );
+    await act(async () => {
+      scaleButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    expect(container.textContent).not.toContain("recipes.scaledRecipe");
+
+    const actionRegistration = fixture.rendererRegistrations[0];
+    const runRegistration = fixture.toolRendererRegistrations[0];
+    const ActionRenderer = actionRegistration?.Component as ComponentType<{
+      context: Record<string, unknown>;
+    }>;
+    const RunRenderer = runRegistration?.Component as ComponentType<{
+      context: Record<string, unknown>;
+    }>;
+    await act(async () =>
+      root.render(
+        <>
+          <RecipesLibrary />
+          <RunRenderer
+            context={{
+              toolName: "submit-recipe-scaling-result",
+              args: { documentId: "recipe-stable-id", factor: 2 },
+              resultJson: undefined,
+              isRunning: true,
+              isActiveTail: true,
+              widgetId: "tool-live:chat-ui",
+              status: "running",
+            }}
+          />
+          <ActionRenderer
+            context={{
+              toolName: "submit-recipe-scaling-result",
+              args: { documentId: "recipe-stable-id", factor: 2 },
+              resultJson: {
+                documentId: "recipe-stable-id",
+                factor: 2,
+                recipe: {
+                  servings: "8",
+                  ingredientLines: ["8 tomatoes"],
+                  instructions: ["Simmer."],
+                  adjustmentExplanations: [],
+                },
+              },
+              isRunning: false,
+              widgetId: "tool-live:chat-ui",
+              status: "completed",
+            }}
+          />
+        </>,
+      ),
+    );
+    expect(container.textContent).toContain("recipes.scaledRecipe");
+    expect(container.textContent).toContain("8 tomatoes");
+    expect(container.textContent).toContain("4 tomatoes");
+
+    const scaleChoice = container.querySelector("select");
+    act(() => {
+      if (!scaleChoice) return;
+      scaleChoice.value = "1.5";
+      scaleChoice.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    expect(container.textContent).not.toContain("recipes.scaledRecipe");
+  });
+
+  it("offers retry after a run stops without a validated result", async () => {
+    setupSelectedRecipe();
+    render(root);
+    const scaleButton = [...container.querySelectorAll("button")].find(
+      (button) => button.textContent?.includes("recipes.scale"),
+    );
+    await act(async () => {
+      scaleButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    fixture.chatRun.isGenerating = false;
+    fixture.chatRun.observedRun = true;
+    fixture.chatRun.stopReason = "stopped";
+    render(root);
+
+    expect(container.textContent).toContain("recipes.scalingResultUnavailable");
+    expect(container.textContent).toContain("recipes.retry");
+    expect(container.textContent).not.toContain("recipes.scaledRecipe");
   });
 
   it("does not dispatch when grant creation fails", async () => {

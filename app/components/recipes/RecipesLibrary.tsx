@@ -1,4 +1,4 @@
-import { sendToAgentChat } from "@agent-native/core/client/agent-chat";
+import { useAgentChatGenerating } from "@agent-native/core/client/agent-chat";
 import {
   actionErrorMessage,
   useActionMutation,
@@ -14,11 +14,17 @@ import { Link, useSearchParams } from "react-router";
 import { QueryErrorState } from "@/components/QueryErrorState";
 import { parseRecipeContent } from "@/components/recipes/recipe-content";
 import { RecipeMarkdown } from "@/components/recipes/RecipeMarkdown";
+import {
+  beginRecipeScalingRequest,
+  clearRecipeScalingResult,
+  createRecipeScalingViewId,
+  RecipeScalingComparison,
+  useRecipeScalingResult,
+} from "@/components/recipes/RecipeScalingResult";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
-import "@/components/recipes/RecipeScalingResult";
 
 type RecipeListItem = {
   id: string;
@@ -78,7 +84,11 @@ function RecipeDetails({
   const scaleMutation = useActionMutation("start-recipe-scaling");
   const [scaleChoice, setScaleChoice] = useState("2");
   const [customFactor, setCustomFactor] = useState("");
+  const [viewId] = useState(createRecipeScalingViewId);
   const [scaleError, setScaleError] = useState<string | null>(null);
+  const [isPreparingScaling, setIsPreparingScaling] = useState(false);
+  const [scaleWasRequested, setScaleWasRequested] = useState(false);
+  const [isGenerating, sendScalingRequest] = useAgentChatGenerating();
   const customFactorNumber = Number(customFactor);
   const factor =
     scaleChoice === "custom"
@@ -86,6 +96,15 @@ function RecipeDetails({
         ? customFactorNumber
         : null
       : Number(scaleChoice);
+  const latestScalingResult = useRecipeScalingResult(
+    viewId,
+    document.id,
+    factor,
+  );
+  useEffect(() => {
+    clearRecipeScalingResult(viewId);
+    return () => clearRecipeScalingResult(viewId);
+  }, [document.id, viewId]);
   const content = parseRecipeContent(document.content ?? "");
   const title = document.title?.trim() || fallbackTitle;
   const hasBody = Boolean(
@@ -94,12 +113,22 @@ function RecipeDetails({
   const requestScaling = async () => {
     if (factor === null || !Number.isFinite(factor) || factor <= 0) return;
     setScaleError(null);
+    clearRecipeScalingResult(viewId);
+    setScaleWasRequested(false);
+    setIsPreparingScaling(true);
     try {
       const grant = await scaleMutation.mutateAsync({
         documentId: document.id,
         factor,
       });
-      sendToAgentChat({
+      const submitMessageId = crypto.randomUUID();
+      beginRecipeScalingRequest({
+        viewId,
+        requestId: submitMessageId,
+        documentId: document.id,
+        factor,
+      });
+      sendScalingRequest({
         message: t("recipes.scalingRequest", { factor: String(factor) }),
         context: JSON.stringify({ documentId: document.id, factor }),
         actionScope: {
@@ -107,12 +136,21 @@ function RecipeDetails({
           grantToken: grant.grantToken,
         },
         submit: true,
+        submitMessageId,
         openSidebar: true,
       });
+      setScaleWasRequested(true);
     } catch (error) {
+      clearRecipeScalingResult(viewId);
       setScaleError(actionErrorMessage(error) ?? t("recipes.scalingError"));
+    } finally {
+      setIsPreparingScaling(false);
     }
   };
+  const scalingResult = latestScalingResult;
+  const scalingPending =
+    isPreparingScaling || (scaleWasRequested && isGenerating);
+  const scalingFailed = scaleWasRequested && !isGenerating && !scalingResult;
 
   return (
     <article className="min-w-0">
@@ -147,7 +185,10 @@ function RecipeDetails({
             aria-label={t("recipes.scaleFactor")}
             className="h-9 rounded-md border border-input bg-background px-3 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             value={scaleChoice}
+            disabled={isPreparingScaling || isGenerating}
             onChange={(event) => {
+              clearRecipeScalingResult(viewId);
+              setScaleWasRequested(false);
               setScaleChoice(event.currentTarget.value);
               setScaleError(null);
             }}
@@ -173,8 +214,11 @@ function RecipeDetails({
               min="0"
               step="any"
               inputMode="decimal"
+              disabled={isPreparingScaling || isGenerating}
               value={customFactor}
               onChange={(event) => {
+                clearRecipeScalingResult(viewId);
+                setScaleWasRequested(false);
                 setCustomFactor(event.currentTarget.value);
                 setScaleError(null);
               }}
@@ -193,11 +237,14 @@ function RecipeDetails({
         <Button
           type="button"
           onClick={() => void requestScaling()}
-          disabled={scaleMutation.isPending || factor === null}
+          disabled={
+            scaleMutation.isPending ||
+            isPreparingScaling ||
+            isGenerating ||
+            factor === null
+          }
         >
-          {scaleMutation.isPending
-            ? t("recipes.scalingPending")
-            : t("recipes.scale")}
+          {scalingPending ? t("recipes.scalingPending") : t("recipes.scale")}
         </Button>
         {scaleError ? (
           <p role="alert" className="w-full text-sm text-destructive">
@@ -206,7 +253,36 @@ function RecipeDetails({
         ) : null}
       </div>
 
-      {hasBody ? (
+      {scalingPending ? (
+        <p
+          role="status"
+          aria-live="polite"
+          className="mt-4 text-sm text-muted-foreground"
+        >
+          {t("recipes.scalingInProgress")}
+        </p>
+      ) : null}
+      {scalingFailed ? (
+        <div className="mt-4 flex flex-wrap items-center gap-3" role="alert">
+          <p className="text-sm text-destructive">
+            {t("recipes.scalingResultUnavailable")}
+          </p>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            disabled={scaleMutation.isPending || isPreparingScaling}
+            onClick={() => void requestScaling()}
+          >
+            {t("recipes.retry")}
+          </Button>
+        </div>
+      ) : null}
+      {scalingResult ? (
+        <RecipeScalingComparison result={scalingResult} source={document} />
+      ) : null}
+
+      {hasBody && !scalingResult ? (
         <div className="mt-5 grid min-w-0 gap-6 md:grid-cols-2">
           <section
             aria-labelledby="recipe-ingredients-heading"

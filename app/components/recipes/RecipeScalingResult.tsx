@@ -1,22 +1,17 @@
-import {
-  actionErrorMessage,
-  useActionQuery,
-  useSession,
-} from "@agent-native/core/client/hooks";
 import { useT } from "@agent-native/core/client/i18n";
 import {
   registerActionChatRenderer,
   type ToolRendererProps,
 } from "@agent-native/toolkit/app/chat/agentkit-chat";
-import { useMemo } from "react";
+import { registerToolRenderer } from "@agent-native/toolkit/app/chat/chat";
+import type { Document } from "@shared/api";
+import { useEffect, useMemo, useSyncExternalStore } from "react";
 
 import { RecipeMarkdown } from "@/components/recipes/RecipeMarkdown";
-import { Button } from "@/components/ui/button";
-import { Skeleton } from "@/components/ui/skeleton";
 
 const RECIPE_SCALING_RENDERER = "sun-home.recipe-scaling-result";
 
-type RecipeScalingResultData = {
+export type RecipeScalingResultData = {
   documentId: string;
   factor: number;
   recipe: {
@@ -31,6 +26,73 @@ type RecipeScalingResultData = {
     adjustmentExplanations: string[];
   };
 };
+
+let nextViewId = 0;
+let currentResult: {
+  viewId: number;
+  result: RecipeScalingResultData;
+} | null = null;
+let activeRequest: {
+  viewId: number;
+  requestId: string;
+  documentId: string;
+  factor: number;
+  widgetId?: string;
+} | null = null;
+const listeners = new Set<() => void>();
+
+function notifyResultChange() {
+  for (const listener of listeners) listener();
+}
+
+export function createRecipeScalingViewId() {
+  nextViewId += 1;
+  return nextViewId;
+}
+
+export function clearRecipeScalingResult(viewId?: number) {
+  const shouldClearResult =
+    currentResult !== null &&
+    (viewId === undefined || currentResult.viewId === viewId);
+  const shouldClearRequest =
+    activeRequest !== null &&
+    (viewId === undefined || activeRequest.viewId === viewId);
+  if (!shouldClearResult && !shouldClearRequest) return;
+  if (shouldClearResult) currentResult = null;
+  if (shouldClearRequest) activeRequest = null;
+  notifyResultChange();
+}
+
+export function beginRecipeScalingRequest(input: {
+  viewId: number;
+  requestId: string;
+  documentId: string;
+  factor: number;
+}) {
+  currentResult = null;
+  activeRequest = { ...input };
+  notifyResultChange();
+}
+
+export function useRecipeScalingResult(
+  viewId: number,
+  documentId: string,
+  factor: number | null,
+) {
+  const result = useSyncExternalStore(
+    (listener) => {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+    () => currentResult,
+    () => null,
+  );
+  return result?.viewId === viewId &&
+    result.result.documentId === documentId &&
+    result.result.factor === factor
+    ? result.result
+    : null;
+}
 
 function parseResult(value: unknown): RecipeScalingResultData | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
@@ -98,76 +160,118 @@ function parseResult(value: unknown): RecipeScalingResultData | null {
   };
 }
 
-function RecipeScalingResult({ context }: ToolRendererProps) {
-  const t = useT();
+export function RecipeScalingResult({ context }: ToolRendererProps) {
+  const requestAtRender = activeRequest;
   const result = useMemo(
     () => parseResult(context.resultJson),
     [context.resultJson],
   );
-  const { session } = useSession();
-  const queryKeyScope = [
-    session?.email ?? null,
-    session?.orgId ?? null,
-  ] as const;
-  const sourceQuery = useActionQuery(
-    "get-document",
-    result ? { id: result.documentId } : undefined,
-    {
-      enabled: Boolean(result),
-      queryKeyScope,
-      staleTime: 0,
-      refetchOnMount: "always",
-      retry: false,
-    },
-  );
+  useEffect(() => {
+    const request = requestAtRender;
+    const widgetId = context.widgetId;
+    if (
+      !request ||
+      activeRequest?.requestId !== request.requestId ||
+      !widgetId ||
+      context.args.documentId !== request.documentId ||
+      context.args.factor !== request.factor
+    ) {
+      return;
+    }
 
-  if (!result) {
-    return (
-      <p role="alert" className="text-sm text-destructive">
-        {t("recipes.scaledResultInvalid")}
-      </p>
-    );
-  }
+    if (
+      context.status === "running" &&
+      context.isRunning &&
+      context.isActiveTail
+    ) {
+      request.widgetId = widgetId;
+      return;
+    }
 
-  if (sourceQuery.isError) {
-    return (
-      <div className="flex flex-col items-start gap-3">
-        <p role="alert" className="text-sm text-destructive">
-          {actionErrorMessage(sourceQuery.error) ??
-            t("recipes.scaledSourceError")}
-        </p>
-        <Button
-          type="button"
-          size="sm"
-          variant="outline"
-          disabled={sourceQuery.isFetching}
-          onClick={() => void sourceQuery.refetch()}
-        >
-          {t("recipes.retry")}
-        </Button>
-      </div>
-    );
-  }
+    if (context.status === "failed" && request.widgetId === widgetId) {
+      activeRequest = null;
+      notifyResultChange();
+      return;
+    }
 
-  if (sourceQuery.isLoading) {
-    return (
-      <div aria-busy="true" className="space-y-3">
-        <Skeleton className="h-7 w-52" />
-        <Skeleton className="h-40 w-full" />
-      </div>
-    );
-  }
+    if (
+      context.status !== "completed" ||
+      request.widgetId !== widgetId ||
+      !result ||
+      result.documentId !== request.documentId ||
+      result.factor !== request.factor
+    ) {
+      return;
+    }
 
-  if (!sourceQuery.data || sourceQuery.data.id !== result.documentId) {
-    return (
-      <p role="status" className="text-sm text-muted-foreground">
-        {t("recipes.scaledSourceMissing")}
-      </p>
-    );
-  }
+    currentResult = { viewId: request.viewId, result };
+    activeRequest = null;
+    notifyResultChange();
+  }, [
+    context.args.documentId,
+    context.args.factor,
+    requestAtRender,
+    context.isActiveTail,
+    context.isRunning,
+    context.status,
+    context.widgetId,
+    result,
+  ]);
 
+  return null;
+}
+
+registerToolRenderer({
+  id: "sun-home.recipe-scaling-result-progress",
+  match: "submit-recipe-scaling-result",
+  Component: RecipeScalingResult,
+});
+
+registerActionChatRenderer({
+  id: RECIPE_SCALING_RENDERER,
+  renderer: RECIPE_SCALING_RENDERER,
+  Component: RecipeScalingResult,
+});
+
+function RecipeLines({
+  title,
+  lines,
+  ordered = false,
+}: {
+  title: string;
+  lines: string[];
+  ordered?: boolean;
+}) {
+  if (lines.length === 0) return null;
+  const List = ordered ? "ol" : "ul";
   return (
-    <div className="grid min-w-0 gap-4 md:grid-cols-2">
+    <section className="mb-5">
+      <h4 className="mb-2 text-sm font-semibold">{title}</h4>
+      <List
+        className={
+          ordered
+            ? "list-decimal space-y-2 ps-5 text-sm"
+            : "list-disc space-y-1 ps-5 text-sm"
+        }
+      >
+        {lines.map((line, index) => (
+          <li key={`${index}-${line}`}>{line}</li>
+        ))}
+      </List>
+    </section>
+  );
+}
+
+export function RecipeScalingComparison({
+  result,
+  source,
+}: {
+  result: RecipeScalingResultData;
+  source: Pick<Document, "id" | "title" | "content">;
+}) {
+  const t = useT();
+  return (
+    <div className="mt-6 grid min-w-0 gap-4 border-t border-border pt-5 md:grid-cols-2">
       <section
         aria-label={t("recipes.originalRecipe")}
         className="min-w-0 rounded-md border border-border p-4"
@@ -175,15 +279,9 @@ function RecipeScalingResult({ context }: ToolRendererProps) {
         <h3 className="mb-3 text-base font-semibold">
           {t("recipes.originalRecipe")}
         </h3>
-        <h4 className="mb-3 break-words text-sm font-medium">
-          {sourceQuery.data.title}
-        </h4>
-        <RecipeMarkdown
-          documentId={sourceQuery.data.id}
-          content={sourceQuery.data.content ?? ""}
-        />
+        <h4 className="mb-3 break-words text-sm font-medium">{source.title}</h4>
+        <RecipeMarkdown documentId={source.id} content={source.content ?? ""} />
       </section>
-
       <section
         aria-label={t("recipes.scaledRecipe", {
           factor: String(result.factor),
@@ -197,95 +295,42 @@ function RecipeScalingResult({ context }: ToolRendererProps) {
           <p className="mb-4 text-sm text-muted-foreground">
             <span className="font-medium text-foreground">
               {t("recipes.servings")}:
-            </span>{" "}
+            </span>
             {result.recipe.servings}
           </p>
         ) : null}
-        {result.recipe.ingredientLines.length > 0 ? (
-          <section aria-label={t("recipes.ingredients")} className="mb-5">
-            <h4 className="mb-2 text-sm font-semibold">
-              {t("recipes.ingredients")}
-            </h4>
-            <ul className="list-disc space-y-1 ps-5 text-sm">
-              {result.recipe.ingredientLines.map((line, index) => (
-                <li key={`${index}-${line}`}>{line}</li>
-              ))}
-            </ul>
-          </section>
-        ) : null}
-        {result.recipe.instructions.length > 0 ? (
-          <section aria-label={t("recipes.instructions")} className="mb-5">
-            <h4 className="mb-2 text-sm font-semibold">
-              {t("recipes.instructions")}
-            </h4>
-            <ol className="list-decimal space-y-2 ps-5 text-sm">
-              {result.recipe.instructions.map((line, index) => (
-                <li key={`${index}-${line}`}>{line}</li>
-              ))}
-            </ol>
-          </section>
-        ) : null}
-        {result.recipe.components?.map((component, componentIndex) => (
-          <section
-            key={`${componentIndex}-${component.name}`}
-            aria-label={component.name}
-            className="mb-5"
-          >
+        <RecipeLines
+          title={t("recipes.ingredients")}
+          lines={result.recipe.ingredientLines}
+        />
+        <RecipeLines
+          title={t("recipes.instructions")}
+          lines={result.recipe.instructions}
+          ordered
+        />
+        {result.recipe.components?.map((component, index) => (
+          <section key={`${index}-${component.name}`} className="mb-5">
             <h4 className="mb-2 break-words text-sm font-semibold">
               {component.name}
             </h4>
-            {component.ingredientLines.length > 0 ? (
-              <section
-                aria-label={`${component.name} ${t("recipes.ingredients")}`}
-                className="mb-3"
-              >
-                <h5 className="mb-2 text-sm font-medium">
-                  {t("recipes.ingredients")}
-                </h5>
-                <ul className="list-disc space-y-1 ps-5 text-sm">
-                  {component.ingredientLines.map((line, index) => (
-                    <li key={`${index}-${line}`}>{line}</li>
-                  ))}
-                </ul>
-              </section>
-            ) : null}
-            {component.instructions.length > 0 ? (
-              <section
-                aria-label={`${component.name} ${t("recipes.instructions")}`}
-              >
-                <h5 className="mb-2 text-sm font-medium">
-                  {t("recipes.instructions")}
-                </h5>
-                <ol className="list-decimal space-y-2 ps-5 text-sm">
-                  {component.instructions.map((line, index) => (
-                    <li key={`${index}-${line}`}>{line}</li>
-                  ))}
-                </ol>
-              </section>
-            ) : null}
+            <RecipeLines
+              title={t("recipes.ingredients")}
+              lines={component.ingredientLines}
+            />
+            <RecipeLines
+              title={t("recipes.instructions")}
+              lines={component.instructions}
+              ordered
+            />
           </section>
         ))}
         {result.recipe.adjustmentExplanations.length > 0 ? (
-          <section aria-label={t("recipes.adjustments")}>
-            <h4 className="mb-2 text-sm font-semibold">
-              {t("recipes.adjustments")}
-            </h4>
-            <ul className="list-disc space-y-1 ps-5 text-sm text-muted-foreground">
-              {result.recipe.adjustmentExplanations.map((line, index) => (
-                <li key={`${index}-${line}`}>{line}</li>
-              ))}
-            </ul>
-          </section>
+          <RecipeLines
+            title={t("recipes.adjustments")}
+            lines={result.recipe.adjustmentExplanations}
+          />
         ) : null}
       </section>
     </div>
   );
 }
-
-registerActionChatRenderer({
-  id: RECIPE_SCALING_RENDERER,
-  renderer: RECIPE_SCALING_RENDERER,
-  Component: RecipeScalingResult,
-});
-
-export { RECIPE_SCALING_RENDERER, RecipeScalingResult };
