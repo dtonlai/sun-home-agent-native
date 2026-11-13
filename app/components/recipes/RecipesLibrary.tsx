@@ -13,6 +13,16 @@ import { Link, useSearchParams } from "react-router";
 
 import { QueryErrorState } from "@/components/QueryErrorState";
 import { parseRecipeContent } from "@/components/recipes/recipe-content";
+import {
+  cuisineOptions,
+  filterRecipeEntries,
+  type RecipeListEntry,
+} from "@/components/recipes/recipe-library-filtering";
+import {
+  RecipeCreationForm,
+  type CreatedRecipe,
+  type RecipeDraftInput,
+} from "@/components/recipes/RecipeCreationForm";
 import { RecipeMarkdown } from "@/components/recipes/RecipeMarkdown";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -20,10 +30,7 @@ import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import "@/components/recipes/RecipeScalingResult";
 
-type RecipeListItem = {
-  id: string;
-  title: string | null;
-};
+type RecipeListItem = RecipeListEntry;
 
 type RecipePageState = {
   spaceId: string;
@@ -271,11 +278,18 @@ function RecipeDetails({
   );
 }
 
-export function RecipesLibrary() {
+export function RecipesLibrary({
+  createRecipe,
+}: {
+  createRecipe?: (recipe: RecipeDraftInput) => Promise<CreatedRecipe>;
+} = {}) {
   const t = useT();
   const [searchParams, setSearchParams] = useSearchParams();
   const selectedRecipeId = searchParams.get("recipeId")?.trim() || null;
   const requestedSpaceId = searchParams.get("spaceId")?.trim() || null;
+  const [recipeSearch, setRecipeSearch] = useState("");
+  const [cuisineFilter, setCuisineFilter] = useState("");
+  const [isCreatingRecipe, setIsCreatingRecipe] = useState(false);
   const { session } = useSession();
   const viewerScope = [session?.email ?? null, session?.orgId ?? null] as const;
   useSetPageTitle(t("recipes.title"));
@@ -350,6 +364,14 @@ export function RecipesLibrary() {
       [],
     );
   }, [activeSpace, pageState]);
+  const availableCuisines = useMemo(
+    () => cuisineOptions(recipeDocuments),
+    [recipeDocuments],
+  );
+  const visibleRecipeDocuments = useMemo(
+    () => filterRecipeEntries(recipeDocuments, recipeSearch, cuisineFilter),
+    [recipeDocuments, recipeSearch, cuisineFilter],
+  );
   const hasMore =
     Boolean(activeSpace) &&
     pageState !== null &&
@@ -476,8 +498,50 @@ export function RecipesLibrary() {
           aria-label={t("recipes.library")}
           className="min-w-0 rounded-lg border border-border bg-card"
         >
-          <div className="border-b border-border px-4 py-3">
+          <div className="flex items-center justify-between gap-2 border-b border-border px-4 py-3">
             <h2 className="text-sm font-semibold">{t("recipes.library")}</h2>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              disabled={!createRecipe}
+              onClick={() => setIsCreatingRecipe(true)}
+            >
+              {t("recipes.addRecipe")}
+            </Button>
+          </div>
+          <div className="grid gap-3 border-b border-border p-3">
+            <div className="grid gap-1.5">
+              <Label htmlFor="recipe-library-search">
+                {t("recipes.librarySearch")}
+              </Label>
+              <Input
+                id="recipe-library-search"
+                type="search"
+                value={recipeSearch}
+                onChange={(event) => setRecipeSearch(event.currentTarget.value)}
+              />
+            </div>
+            <div className="grid gap-1.5">
+              <Label htmlFor="recipe-cuisine-filter">
+                {t("recipes.filterCuisine")}
+              </Label>
+              <select
+                id="recipe-cuisine-filter"
+                className="h-9 rounded-md border border-input bg-background px-3 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                value={cuisineFilter}
+                onChange={(event) =>
+                  setCuisineFilter(event.currentTarget.value)
+                }
+              >
+                <option value="">{t("recipes.allCuisines")}</option>
+                {availableCuisines.map((cuisine) => (
+                  <option key={cuisine} value={cuisine}>
+                    {cuisine}
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
           {documentsQuery.isLoading && !listLoaded ? (
             <div className="space-y-2 p-3" aria-busy="true">
@@ -485,11 +549,11 @@ export function RecipesLibrary() {
                 <Skeleton key={index} className="h-10 w-full" />
               ))}
             </div>
-          ) : recipeDocuments.length > 0 ? (
+          ) : visibleRecipeDocuments.length > 0 ? (
             <>
               <nav aria-label={t("recipes.library")}>
                 <ul className="divide-y divide-border">
-                  {recipeDocuments.map((document) => {
+                  {visibleRecipeDocuments.map((document) => {
                     const active = document.id === selectedRecipeId;
                     const params = new URLSearchParams();
                     params.set("spaceId", activeSpace.id);
@@ -549,6 +613,23 @@ export function RecipesLibrary() {
                 retrying={documentsQuery.isFetching}
               />
             </div>
+          ) : listLoaded && recipeDocuments.length > 0 ? (
+            <div className="grid justify-items-start gap-2 p-4">
+              <p className="text-sm text-muted-foreground">
+                {t("recipes.noMatchingRecipes")}
+              </p>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => {
+                  setRecipeSearch("");
+                  setCuisineFilter("");
+                }}
+              >
+                {t("recipes.clearFilters")}
+              </Button>
+            </div>
           ) : listLoaded ? (
             <p className="p-4 text-sm text-muted-foreground">
               {t("recipes.noRecipes")}
@@ -560,7 +641,12 @@ export function RecipesLibrary() {
           aria-label={t("recipes.viewer")}
           className="min-w-0 rounded-lg border border-border bg-card p-4 sm:p-6"
         >
-          {selectedRecipeId ? (
+          {isCreatingRecipe && createRecipe ? (
+            <RecipeCreationForm
+              onCancel={() => setIsCreatingRecipe(false)}
+              onCreate={createRecipe}
+            />
+          ) : selectedRecipeId ? (
             documentQuery.isLoading ? (
               <div aria-busy="true" className="space-y-4">
                 <Skeleton className="h-8 w-64" />
