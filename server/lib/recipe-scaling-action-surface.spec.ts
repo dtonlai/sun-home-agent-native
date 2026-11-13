@@ -1,44 +1,52 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
-const mocks = vi.hoisted(() => ({
-  bindRecipeScalingGrant: vi.fn(),
-  getRequestUserEmail: vi.fn(),
-  getThread: vi.fn(),
-  resolveDocumentAccess: vi.fn(),
-}));
+import { getDbExec } from "@agent-native/core/db";
+import {
+  createThread,
+  getThread,
+  runWithRequestContext,
+} from "@agent-native/core/server";
+import { eq } from "drizzle-orm";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
-vi.mock("@agent-native/core/server", () => ({
-  getRequestUserEmail: mocks.getRequestUserEmail,
-  getThread: mocks.getThread,
-}));
+import { createRecipeScalingGrant } from "./recipe-scaling-grants.js";
 
-vi.mock("../../actions/_document-access.js", () => ({
-  resolveDocumentAccess: mocks.resolveDocumentAccess,
-}));
-
-vi.mock("./recipe-scaling-grants.js", () => ({
-  bindRecipeScalingGrant: mocks.bindRecipeScalingGrant,
-}));
-
-import { resolveRecipeScalingActionSurface } from "./recipe-scaling-action-surface.js";
-
+const TEST_DB_PATH = join(
+  tmpdir(),
+  `sun-home-recipe-scaling-${process.pid}-${Date.now()}.pglite`,
+);
 const OWNER = "recipe-owner@example.com";
+const OUTSIDER = "recipe-outsider@example.com";
+const SPACE_MEMBER = "recipe-space-member@example.com";
 const DOCUMENT_ID = "recipe-scaling-page";
 const THREAD_ID = "recipe-scaling-thread";
-const GRANT_TOKEN = "grant-token-with-at-least-forty-characters-1234567890";
+const OTHER_OWNER_THREAD_ID = "recipe-scaling-other-owner-thread";
+const OUTSIDER_THREAD_ID = "recipe-scaling-outsider-thread";
+const SPACE_MEMBER_THREAD_ID = "recipe-scaling-space-member-thread";
+const SPACE_ORG_ID = "recipe-scaling-space-org";
+const SPACE_DOCUMENT_ID = "recipe-scaling-space-page";
 const FACTOR = 1.5;
+
+let getDb: typeof import("../db/index.js").getDb;
+let schema: typeof import("../db/schema.js");
+let spaceId: string;
+let grantToken = "";
+let resolveSurface: typeof import("./recipe-scaling-action-surface.js").resolveRecipeScalingActionSurface;
+
+const asUser = <T>(userEmail: string, run: () => Promise<T>) =>
+  runWithRequestContext({ userEmail }, run);
 
 function scalingDetails(overrides: Record<string, unknown> = {}) {
   return {
     ownerEmail: OWNER,
     orgId: null,
     threadId: THREAD_ID,
-    requestedTurnId: "scale-turn-1",
-    queuedMessageId: "scale-message-1",
     mode: "act" as const,
     actionScope: {
       kind: "sun-home-recipe-scaling",
-      grantToken: GRANT_TOKEN,
+      grantToken,
     },
     availableActionNames: [
       "get-document",
@@ -49,128 +57,244 @@ function scalingDetails(overrides: Record<string, unknown> = {}) {
   };
 }
 
-beforeEach(() => {
-  vi.resetAllMocks();
-  mocks.getRequestUserEmail.mockReturnValue(OWNER);
-  mocks.getThread.mockResolvedValue({ id: THREAD_ID, ownerEmail: OWNER });
-  mocks.bindRecipeScalingGrant.mockResolvedValue({
-    documentId: DOCUMENT_ID,
-    factor: FACTOR,
+beforeAll(async () => {
+  process.env.DATABASE_URL = `pglite:${TEST_DB_PATH}`;
+  const dbModule = await import("../db/index.js");
+  getDb = dbModule.getDb;
+  schema = dbModule.schema;
+  const dbPlugin = (await import("../plugins/db.js")).default;
+  await dbPlugin(undefined as never);
+  await getDbExec().execute(`CREATE TABLE IF NOT EXISTS organizations (
+    id TEXT PRIMARY KEY, name TEXT NOT NULL, created_by TEXT NOT NULL, created_at BIGINT NOT NULL,
+    identity_authority TEXT, identity_id TEXT
+  )`);
+  await getDbExec().execute(`CREATE TABLE IF NOT EXISTS org_members (
+    id TEXT PRIMARY KEY, org_id TEXT NOT NULL, email TEXT NOT NULL, role TEXT NOT NULL, joined_at BIGINT NOT NULL,
+    federation_removal_pending_at BIGINT
+  )`);
+  await getDbExec().execute({
+    sql: "INSERT INTO organizations (id, name, created_by, created_at) VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING",
+    args: [SPACE_ORG_ID, "Recipe Space", OWNER, Date.now()],
   });
-  mocks.resolveDocumentAccess.mockResolvedValue({
-    resource: { trashedAt: null },
+  await getDbExec().execute({
+    sql: "INSERT INTO org_members (id, org_id, email, role, joined_at) VALUES ($1, $2, $3, $4, $5) ON CONFLICT DO NOTHING",
+    args: [
+      "recipe-space-member",
+      SPACE_ORG_ID,
+      SPACE_MEMBER,
+      "member",
+      Date.now(),
+    ],
   });
+  const { organizationContentSpaceId } =
+    await import("../../actions/_content-spaces.js");
+  spaceId = organizationContentSpaceId(SPACE_ORG_ID);
+  const now = new Date().toISOString();
+  await getDb().insert(schema.contentSpaces).values({
+    id: spaceId,
+    name: "Recipe Space",
+    kind: "organization",
+    ownerEmail: OWNER,
+    orgId: SPACE_ORG_ID,
+    filesDatabaseId: "recipe-scaling-space-files",
+    createdBy: OWNER,
+    createdAt: now,
+    updatedAt: now,
+  });
+  await createThread(OWNER, { id: THREAD_ID });
+  await createThread(OWNER, { id: OTHER_OWNER_THREAD_ID });
+  await createThread(OUTSIDER, { id: OUTSIDER_THREAD_ID });
+  await createThread(SPACE_MEMBER, { id: SPACE_MEMBER_THREAD_ID });
+  const { resolveRecipeScalingActionSurface } =
+    await import("./recipe-scaling-action-surface.js");
+  resolveSurface = resolveRecipeScalingActionSurface;
+}, 60_000);
+
+beforeEach(async () => {
+  await getDb().delete(schema.recipeScalingGrants);
+  await getDb().delete(schema.documents);
+  await getDb().insert(schema.documents).values({
+    id: DOCUMENT_ID,
+    ownerEmail: OWNER,
+    title: "Recipe scaling fixture",
+    content: "Ingredients\n- 1 cup flour",
+    bodyRevision: 1,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  });
+  grantToken = (
+    await createRecipeScalingGrant({
+      ownerEmail: OWNER,
+      documentId: DOCUMENT_ID,
+      factor: FACTOR,
+    })
+  ).token;
+});
+
+afterAll(() => {
+  rmSync(TEST_DB_PATH, { force: true, recursive: true });
 });
 
 describe("recipe scaling action surface", () => {
-  it("binds the grant to the caller, thread, turn, message, and accessible source", async () => {
-    const surface = await resolveRecipeScalingActionSurface(scalingDetails());
+  it("binds the grant to caller, accessible source, factor, and exact allowlist", async () => {
+    const surface = await asUser(OWNER, () => resolveSurface(scalingDetails()));
+    expect(surface).toEqual({
+      allowedActionNames: ["get-document", "submit-recipe-scaling-result"],
+      actionScope: { kind: "sun-home-recipe-scaling", grantToken },
+    });
+  });
 
+  it("requires the validated result action and excludes Content writes", async () => {
+    const surface = await asUser(OWNER, () =>
+      resolveSurface(
+        scalingDetails({
+          availableActionNames: [
+            "get-document",
+            "submit-recipe-scaling-result",
+            "create-document",
+            "update-document",
+          ],
+        }),
+      ),
+    );
+    expect(surface?.allowedActionNames).toEqual([
+      "get-document",
+      "submit-recipe-scaling-result",
+    ]);
+    expect(surface?.allowedActionNames).not.toContain("create-document");
+    expect(surface?.allowedActionNames).not.toContain("update-document");
+
+    await expect(
+      asUser(OWNER, () =>
+        resolveSurface(
+          scalingDetails({ availableActionNames: ["get-document"] }),
+        ),
+      ),
+    ).rejects.toMatchObject({
+      errorCode: "recipe_scaling_actions_unavailable",
+    });
+  });
+
+  it("rejects caller-minted scopes and binds a valid grant once to thread and available turn/message IDs", async () => {
+    await asUser(OWNER, async () => {
+      expect((await getThread(THREAD_ID))?.scope).toBeNull();
+    });
+    await expect(
+      asUser(OWNER, () =>
+        resolveSurface(
+          scalingDetails({
+            actionScope: {
+              kind: "sun-home-recipe-scaling",
+              grantToken: "x".repeat(48),
+            },
+          }),
+        ),
+      ),
+    ).rejects.toMatchObject({ errorCode: "recipe_scaling_grant_unavailable" });
+
+    const details = scalingDetails({
+      requestedTurnId: "scale-turn-1",
+      queuedMessageId: "scale-message-1",
+    });
+    await asUser(OWNER, () => resolveSurface(details));
+    await expect(
+      asUser(OWNER, () => resolveSurface(details)),
+    ).resolves.toMatchObject({ actionScope: { grantToken } });
+    await expect(
+      asUser(OWNER, () =>
+        resolveSurface({ ...details, threadId: OTHER_OWNER_THREAD_ID }),
+      ),
+    ).rejects.toMatchObject({ errorCode: "recipe_scaling_grant_unavailable" });
+    await expect(
+      asUser(OWNER, () =>
+        resolveSurface({ ...details, requestedTurnId: "different-turn" }),
+      ),
+    ).rejects.toMatchObject({ errorCode: "recipe_scaling_grant_unavailable" });
+  });
+
+  it("authorizes Content-space access without owner or direct-user share access", async () => {
+    const now = new Date().toISOString();
+    await getDb().insert(schema.documents).values({
+      id: SPACE_DOCUMENT_ID,
+      spaceId,
+      ownerEmail: OWNER,
+      orgId: SPACE_ORG_ID,
+      visibility: "org",
+      title: "Shared space recipe",
+      content: "Ingredients\n- 2 apples",
+      bodyRevision: 1,
+      createdAt: now,
+      updatedAt: now,
+    });
+    const directShares = await getDb()
+      .select({ id: schema.documentShares.id })
+      .from(schema.documentShares)
+      .where(eq(schema.documentShares.resourceId, SPACE_DOCUMENT_ID));
+    expect(directShares).toEqual([]);
+    const memberGrant = await createRecipeScalingGrant({
+      ownerEmail: SPACE_MEMBER,
+      documentId: SPACE_DOCUMENT_ID,
+      factor: 0.5,
+    });
+    const surface = await asUser(SPACE_MEMBER, async () => {
+      const { resolveContentSpaceAccess } =
+        await import("../../actions/_content-space-access.js");
+      await expect(resolveContentSpaceAccess(spaceId)).resolves.toMatchObject({
+        role: "viewer",
+      });
+      return resolveSurface(
+        scalingDetails({
+          ownerEmail: SPACE_MEMBER,
+          threadId: SPACE_MEMBER_THREAD_ID,
+          actionScope: {
+            kind: "sun-home-recipe-scaling",
+            grantToken: memberGrant.token,
+          },
+        }),
+      );
+    });
     expect(surface).toEqual({
       allowedActionNames: ["get-document", "submit-recipe-scaling-result"],
       actionScope: {
         kind: "sun-home-recipe-scaling",
-        grantToken: GRANT_TOKEN,
+        grantToken: memberGrant.token,
       },
     });
-    expect(mocks.bindRecipeScalingGrant).toHaveBeenCalledWith(GRANT_TOKEN, {
-      ownerEmail: OWNER,
-      threadId: THREAD_ID,
-      turnId: "scale-turn-1",
-      messageId: "scale-message-1",
-    });
-    expect(mocks.resolveDocumentAccess).toHaveBeenCalledWith(DOCUMENT_ID);
   });
 
-  it("keeps Content writes out and requires both scaling actions", async () => {
-    const surface = await resolveRecipeScalingActionSurface(scalingDetails());
-    expect(surface?.allowedActionNames).not.toContain("update-document");
-
+  it("rejects another caller, malformed scopes, plan mode, inaccessible documents, and unowned threads", async () => {
     await expect(
-      resolveRecipeScalingActionSurface(
-        scalingDetails({ availableActionNames: ["get-document"] }),
-      ),
-    ).rejects.toMatchObject({ errorCode: "recipe_scaling_actions_unavailable" });
+      asUser(OUTSIDER, () => resolveSurface(scalingDetails())),
+    ).rejects.toMatchObject({ errorCode: "recipe_scaling_scope_unavailable" });
     await expect(
-      resolveRecipeScalingActionSurface(
-        scalingDetails({
-          availableActionNames: ["submit-recipe-scaling-result"],
-        }),
-      ),
-    ).rejects.toMatchObject({ errorCode: "recipe_scaling_actions_unavailable" });
-  });
-
-  it("rejects invalid scopes, callers, and non-active turns", async () => {
-    await expect(
-      resolveRecipeScalingActionSurface(
-        scalingDetails({
-          actionScope: {
-            kind: "sun-home-recipe-scaling",
-            grantToken: "short-token",
-          },
-        }),
+      asUser(OWNER, () =>
+        resolveSurface(
+          scalingDetails({ actionScope: { kind: "sun-home-recipe-scaling" } }),
+        ),
       ),
     ).rejects.toMatchObject({ errorCode: "recipe_scaling_binding_invalid" });
-
-    mocks.getRequestUserEmail.mockReturnValue("recipe-outsider@example.com");
     await expect(
-      resolveRecipeScalingActionSurface(scalingDetails()),
-    ).rejects.toMatchObject({ errorCode: "recipe_scaling_scope_unavailable" });
-
-    mocks.getRequestUserEmail.mockReturnValue(OWNER);
-    await expect(
-      resolveRecipeScalingActionSurface(scalingDetails({ mode: "plan" })),
+      asUser(OWNER, () => resolveSurface(scalingDetails({ mode: "plan" }))),
     ).rejects.toMatchObject({ errorCode: "recipe_scaling_turn_invalid" });
-  });
-
-  it("rejects missing or unowned threads, unavailable grants, and inaccessible or trashed sources", async () => {
-    mocks.getThread.mockResolvedValueOnce(null);
     await expect(
-      resolveRecipeScalingActionSurface(scalingDetails()),
+      asUser(OWNER, () =>
+        resolveSurface(scalingDetails({ threadId: "missing-thread" })),
+      ),
     ).rejects.toMatchObject({ errorCode: "recipe_scaling_thread_unavailable" });
-
-    mocks.getThread.mockResolvedValueOnce({
-      id: THREAD_ID,
-      ownerEmail: "recipe-outsider@example.com",
-    });
     await expect(
-      resolveRecipeScalingActionSurface(scalingDetails()),
-    ).rejects.toMatchObject({ errorCode: "recipe_scaling_thread_unavailable" });
-
-    mocks.getThread.mockResolvedValue({ id: THREAD_ID, ownerEmail: OWNER });
-    mocks.bindRecipeScalingGrant.mockRejectedValueOnce(
-      Object.assign(new Error("Grant unavailable"), {
-        errorCode: "recipe_scaling_grant_unavailable",
-      }),
-    );
-    await expect(
-      resolveRecipeScalingActionSurface(scalingDetails()),
-    ).rejects.toMatchObject({ errorCode: "recipe_scaling_grant_unavailable" });
-
-    mocks.bindRecipeScalingGrant.mockResolvedValue({
-      documentId: DOCUMENT_ID,
-      factor: FACTOR,
-    });
-    mocks.resolveDocumentAccess.mockResolvedValueOnce(null);
-    await expect(
-      resolveRecipeScalingActionSurface(scalingDetails()),
+      asUser(OWNER, () =>
+        resolveSurface(
+          scalingDetails({ availableActionNames: ["get-document"] }),
+        ),
+      ),
     ).rejects.toMatchObject({
-      errorCode: "recipe_scaling_document_unavailable",
-    });
-
-    mocks.resolveDocumentAccess.mockResolvedValueOnce({
-      resource: { trashedAt: "2026-11-13T00:00:00.000Z" },
-    });
-    await expect(
-      resolveRecipeScalingActionSurface(scalingDetails()),
-    ).rejects.toMatchObject({
-      errorCode: "recipe_scaling_document_unavailable",
+      errorCode: "recipe_scaling_actions_unavailable",
     });
   });
 
   it("does not claim ordinary chat or comment scopes", async () => {
     await expect(
-      resolveRecipeScalingActionSurface({
+      resolveSurface({
         ownerEmail: OWNER,
         actionScope: { kind: "content-comment-ai", requestId: "request" },
       }),
