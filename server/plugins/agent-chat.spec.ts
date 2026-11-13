@@ -16,7 +16,8 @@ vi.mock("@agent-native/core/server", async (importOriginal) => ({
   loadActionsFromStaticRegistry: mocks.loadActionsFromStaticRegistry,
 }));
 
-vi.mock("@agent-native/core/org", () => ({
+vi.mock("@agent-native/core/org", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@agent-native/core/org")>()),
   getOrgContext: vi.fn(),
 }));
 
@@ -54,7 +55,7 @@ describe("Content agent chat plugin", () => {
 
     expect(mocks.createAgentChatPlugin).toHaveBeenCalledWith(
       expect.objectContaining({
-        appId: "content",
+        appId: "sun-home-agent-native",
         durableBackgroundRuns: true,
       }),
     );
@@ -75,12 +76,33 @@ describe("Content agent chat plugin", () => {
     );
   });
 
+  it("requires scoped recipe scaling to read the source and submit its validated result", async () => {
+    await import("./agent-chat.js");
+
+    const options = mocks.createAgentChatPlugin.mock.calls[0]?.[0] as {
+      systemPrompt?: string;
+    };
+
+    expect(options.systemPrompt).toContain(
+      "For a scoped recipe scaling request",
+    );
+    expect(options.systemPrompt).toContain(
+      "Call get-document with that exact documentId",
+    );
+    expect(options.systemPrompt).toContain(
+      "Call submit-recipe-scaling-result with the action's full validated schema",
+    );
+    expect(options.systemPrompt).toContain(
+      "Do not report that scaling is validated or the comparison is complete unless submit-recipe-scaling-result succeeds",
+    );
+  });
+
   it("keeps Content-owned MCP membership on actions and explicitly allowlists writes", async () => {
     await import("./agent-chat.js");
 
     expect(mocks.createAgentChatPlugin).toHaveBeenCalledWith(
       expect.objectContaining({
-        appId: "content",
+        appId: "sun-home-agent-native",
         mcp: expect.objectContaining({
           externalAgents: { writes: "allowlisted" },
           instructions: expect.stringContaining(
