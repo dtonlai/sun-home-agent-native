@@ -1443,15 +1443,10 @@ const enUS = {
     customScaleInvalid: "Enter a finite value greater than zero.",
     scale: "Scale recipe",
     scalingPending: "Preparing scaling request…",
-    scalingInProgress:
-      "Scaling is underway in the AgentSidebar. You can steer the agent there; the result will appear here after the validated result action completes.",
-    scalingResultUnavailable:
-      "The scaling run ended without a validated recipe result. You can try again.",
     scalingRequest:
       "Scale the selected recipe by {{factor}}× and return the validated result without editing Content.",
     scalingError: "Could not start recipe scaling.",
     originalRecipe: "Original recipe",
-    scaledRecipePending: "Scaled recipe",
     scaledRecipe: "Scaled recipe ({{factor}}×)",
     adjustments: "Adjustment notes",
     scaledResultInvalid: "The scaling result could not be displayed.",

@@ -1,12 +1,47 @@
 // @vitest-environment happy-dom
 
-import { act } from "react";
+import { act, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const fixture = vi.hoisted(() => ({
+  source: {
+    data: {
+      id: "recipe-1",
+      spaceId: "recipes-space",
+      title: "Original Soup",
+      content:
+        "## Ingredients\n- Original tomatoes\n\n## Instructions\nSimmer.",
+    } as unknown,
+    isLoading: false,
+    isError: false,
+    isFetching: false,
+    error: null as unknown,
+    refetch: vi.fn(),
+  },
+  queries: [] as Array<{
+    name: string;
+    args: Record<string, unknown> | undefined;
+  }>,
+  queryEnabled: [] as boolean[],
   rendererRegistrations: [] as Array<Record<string, unknown>>,
-  toolRendererRegistrations: [] as Array<Record<string, unknown>>,
+}));
+
+vi.mock("@agent-native/core/client/hooks", () => ({
+  actionErrorMessage: (error: unknown) =>
+    error instanceof Error ? error.message : undefined,
+  useSession: () => ({
+    session: { email: "alice@example.com", orgId: "org-1" },
+  }),
+  useActionQuery: (
+    name: string,
+    args: Record<string, unknown> | undefined,
+    options?: { enabled?: boolean },
+  ) => {
+    fixture.queries.push({ name, args });
+    fixture.queryEnabled.push(options?.enabled ?? true);
+    return fixture.source;
+  },
 }));
 
 vi.mock("@agent-native/core/client/i18n", () => ({
@@ -24,27 +59,23 @@ vi.mock("@agent-native/toolkit/app/chat/agentkit-chat", () => ({
   },
 }));
 
-vi.mock("@agent-native/toolkit/app/chat/chat", () => ({
-  registerToolRenderer: (registration: Record<string, unknown>) => {
-    fixture.toolRendererRegistrations.push(registration);
-    return vi.fn();
-  },
-}));
-
 vi.mock("@/components/recipes/RecipeMarkdown", () => ({
   RecipeMarkdown: ({ content }: { content: string }) => (
     <pre data-testid="source-markdown">{content}</pre>
   ),
 }));
 
-import {
-  beginRecipeScalingRequest,
-  clearRecipeScalingResult,
-  createRecipeScalingViewId,
-  RecipeScalingComparison,
-  RecipeScalingResult,
-  useRecipeScalingResult,
-} from "@/components/recipes/RecipeScalingResult";
+vi.mock("@/components/ui/button", () => ({
+  Button: ({ children, ...props }: Record<string, unknown>) => (
+    <button {...props}>{children as ReactNode}</button>
+  ),
+}));
+
+vi.mock("@/components/ui/skeleton", () => ({
+  Skeleton: () => <div data-testid="skeleton" />,
+}));
+
+import { RecipeScalingResult } from "@/components/recipes/RecipeScalingResult";
 
 const result = {
   documentId: "recipe-1",
@@ -57,9 +88,19 @@ const result = {
   },
 };
 
-function ResultObserver({ viewId }: { viewId: number }) {
-  const value = useRecipeScalingResult(viewId, "recipe-1", 1.5);
-  return <span data-testid="result-id">{value?.documentId ?? "empty"}</span>;
+function render(root: Root, resultJson: unknown = result) {
+  act(() =>
+    root.render(
+      <RecipeScalingResult
+        context={{
+          toolName: "submit-recipe-scaling-result",
+          args: {},
+          resultJson,
+          isRunning: false,
+        }}
+      />,
+    ),
+  );
 }
 
 describe("RecipeScalingResult", () => {
@@ -67,7 +108,19 @@ describe("RecipeScalingResult", () => {
   let root: Root;
 
   beforeEach(() => {
-    clearRecipeScalingResult();
+    fixture.source.data = {
+      id: "recipe-1",
+      spaceId: "recipes-space",
+      title: "Original Soup",
+      content:
+        "## Ingredients\n- Original tomatoes\n\n## Instructions\nSimmer.",
+    };
+    fixture.source.isLoading = false;
+    fixture.source.isError = false;
+    fixture.source.isFetching = false;
+    fixture.source.error = null;
+    fixture.queries = [];
+    fixture.queryEnabled = [];
     container = document.createElement("div");
     document.body.appendChild(container);
     root = createRoot(container);
@@ -76,280 +129,131 @@ describe("RecipeScalingResult", () => {
   afterEach(() => {
     act(() => root.unmount());
     container.remove();
-    clearRecipeScalingResult();
   });
 
-  it("registers the public action renderer and publishes only a completed validated result", () => {
-    const viewId = createRecipeScalingViewId();
-    beginRecipeScalingRequest({
-      viewId,
-      requestId: "submit-current",
-      documentId: "recipe-1",
-      factor: 1.5,
-    });
-    act(() => root.render(<ResultObserver viewId={viewId} />));
+  it("registers the action renderer and reads the original by stable ID", () => {
+    render(root);
+
+    expect(fixture.rendererRegistrations).toHaveLength(1);
     expect(fixture.rendererRegistrations[0]).toMatchObject({
       id: "sun-home.recipe-scaling-result",
       renderer: "sun-home.recipe-scaling-result",
     });
-    expect(fixture.toolRendererRegistrations[0]).toMatchObject({
-      id: "sun-home.recipe-scaling-result-progress",
-      match: "submit-recipe-scaling-result",
+    expect(fixture.queries).toContainEqual({
+      name: "get-document",
+      args: { id: "recipe-1" },
     });
-
-    act(() =>
-      root.render(
-        <>
-          <RecipeScalingResult
-            context={{
-              toolName: "submit-recipe-scaling-result",
-              args: { documentId: "recipe-1", factor: 1.5 },
-              resultJson: undefined,
-              isRunning: true,
-              isActiveTail: true,
-              widgetId: "tool-current:chat-ui",
-              status: "running",
-            }}
-          />
-          <ResultObserver viewId={viewId} />
-        </>,
-      ),
-    );
-    expect(
-      container.querySelector('[data-testid="result-id"]')?.textContent,
-    ).toBe("empty");
-
-    act(() =>
-      root.render(
-        <>
-          <ResultObserver viewId={viewId} />
-          <RecipeScalingResult
-            context={{
-              toolName: "submit-recipe-scaling-result",
-              args: { documentId: "recipe-1", factor: 1.5 },
-              resultJson: result,
-              isRunning: false,
-              widgetId: "tool-current:chat-ui",
-              status: "completed",
-            }}
-          />
-        </>,
-      ),
-    );
-    expect(
-      container.querySelector('[data-testid="result-id"]')?.textContent,
-    ).toBe("recipe-1");
-  });
-
-  it("ignores historical renderer remounts without the active request widget correlation", () => {
-    const viewId = createRecipeScalingViewId();
-    beginRecipeScalingRequest({
-      viewId,
-      requestId: "submit-current",
-      documentId: "recipe-1",
-      factor: 1.5,
-    });
-    act(() =>
-      root.render(
-        <>
-          <ResultObserver viewId={viewId} />
-          <RecipeScalingResult
-            context={{
-              toolName: "submit-recipe-scaling-result",
-              args: { documentId: "recipe-1", factor: 1.5 },
-              resultJson: result,
-              isRunning: false,
-              isActiveTail: false,
-              widgetId: "tool-historical:chat-ui",
-              status: "completed",
-            }}
-          />
-        </>,
-      ),
-    );
-
-    expect(
-      container.querySelector('[data-testid="result-id"]')?.textContent,
-    ).toBe("empty");
-  });
-
-  it("keeps a completed result scoped to the recipe view that requested it", () => {
-    const requestingViewId = createRecipeScalingViewId();
-    const reenteredViewId = createRecipeScalingViewId();
-    beginRecipeScalingRequest({
-      viewId: requestingViewId,
-      requestId: "submit-current",
-      documentId: "recipe-1",
-      factor: 1.5,
-    });
-    act(() =>
-      root.render(
-        <RecipeScalingResult
-          context={{
-            toolName: "submit-recipe-scaling-result",
-            args: { documentId: "recipe-1", factor: 1.5 },
-            resultJson: undefined,
-            isRunning: true,
-            isActiveTail: true,
-            widgetId: "tool-current:chat-ui",
-            status: "running",
-          }}
-        />,
-      ),
-    );
-    act(() =>
-      root.render(
-        <RecipeScalingResult
-          context={{
-            toolName: "submit-recipe-scaling-result",
-            args: { documentId: "recipe-1", factor: 1.5 },
-            resultJson: result,
-            isRunning: false,
-            widgetId: "tool-current:chat-ui",
-            status: "completed",
-          }}
-        />,
-      ),
-    );
-    act(() => root.render(<ResultObserver viewId={reenteredViewId} />));
-
-    expect(
-      container.querySelector('[data-testid="result-id"]')?.textContent,
-    ).toBe("empty");
-  });
-
-  it("rejects mismatched document or factor from the current request action", () => {
-    const viewId = createRecipeScalingViewId();
-    beginRecipeScalingRequest({
-      viewId,
-      requestId: "submit-current",
-      documentId: "recipe-1",
-      factor: 1.5,
-    });
-    const mismatch = {
-      ...result,
-      factor: 2,
-    };
-    act(() =>
-      root.render(
-        <RecipeScalingResult
-          context={{
-            toolName: "submit-recipe-scaling-result",
-            args: { documentId: "recipe-1", factor: 2 },
-            resultJson: mismatch,
-            isRunning: true,
-            isActiveTail: true,
-            widgetId: "tool-mismatch:chat-ui",
-            status: "running",
-          }}
-        />,
-      ),
-    );
-    act(() =>
-      root.render(
-        <>
-          <RecipeScalingResult
-            context={{
-              toolName: "submit-recipe-scaling-result",
-              args: { documentId: "recipe-1", factor: 1.5 },
-              resultJson: mismatch,
-              isRunning: false,
-              widgetId: "tool-mismatch:chat-ui",
-              status: "completed",
-            }}
-          />
-          <ResultObserver viewId={viewId} />
-        </>,
-      ),
-    );
-
-    expect(
-      container.querySelector('[data-testid="result-id"]')?.textContent,
-    ).toBe("empty");
-  });
-
-  it("shows the source read-only beside the validated scaled recipe", () => {
-    act(() =>
-      root.render(
-        <RecipeScalingComparison
-          result={result}
-          source={{
-            id: "recipe-1",
-            title: "Original Soup",
-            content: "Original tomatoes",
-          }}
-        />,
-      ),
-    );
-
     expect(container.textContent).toContain("Original Soup");
     expect(container.textContent).toContain("Original tomatoes");
     expect(container.textContent).toContain("6 tomatoes");
     expect(container.textContent).toContain(
       "Keep the cooking time close to the original.",
     );
-    expect(
-      container.querySelector('[aria-label="recipes.originalRecipe"]'),
-    ).not.toBeNull();
+  });
+
+  it("labels the comparison regions and stacks them below desktop width", () => {
+    render(root);
+
+    const original = container.querySelector<HTMLElement>(
+      '[aria-label="recipes.originalRecipe"]',
+    );
+    const scaled = container.querySelector<HTMLElement>(
+      '[aria-label="recipes.scaledRecipe"]',
+    );
+    expect(original?.textContent).toContain("recipes.originalRecipe");
+    expect(scaled?.textContent).toContain("recipes.scaledRecipe");
     expect(container.firstElementChild?.className).toContain("md:grid-cols-2");
   });
 
-  it("renders grouped-only and mixed flat plus grouped recipe sections", () => {
-    act(() =>
-      root.render(
-        <RecipeScalingComparison
-          result={{
-            ...result,
-            recipe: {
-              servings: null,
-              ingredientLines: [],
-              instructions: [],
-              components: [
-                {
-                  name: "Tomato sauce",
-                  ingredientLines: ["2 cups tomatoes"],
-                  instructions: ["Cook until thick."],
-                },
-                {
-                  name: "Finish",
-                  ingredientLines: ["Fresh basil"],
-                  instructions: [],
-                },
-              ],
-              adjustmentExplanations: [],
-            },
-          }}
-          source={{ id: "recipe-1", title: "Soup", content: "Source" }}
-        />,
-      ),
-    );
-    expect(container.textContent).toContain("2 cups tomatoes");
-    expect(container.textContent).toContain("Cook until thick.");
-    expect(container.textContent).toContain("Fresh basil");
+  it("renders legacy flat ingredient and instruction sections", () => {
+    render(root);
 
-    act(() =>
-      root.render(
-        <RecipeScalingComparison
-          result={{
-            ...result,
-            recipe: {
-              ...result.recipe,
-              ingredientLines: ["1 tablespoon oil"],
-              components: [
-                {
-                  name: "Marinade",
-                  ingredientLines: ["1 teaspoon ginger"],
-                  instructions: ["Whisk together."],
-                },
-              ],
-            },
-          }}
-          source={{ id: "recipe-1", title: "Soup", content: "Source" }}
-        />,
-      ),
-    );
+    expect(
+      container.querySelector('[aria-label="recipes.ingredients"]'),
+    ).not.toBeNull();
+    expect(
+      container.querySelector('[aria-label="recipes.instructions"]'),
+    ).not.toBeNull();
+    expect(container.textContent).toContain("6 tomatoes");
+    expect(container.textContent).toContain("Simmer gently until tender.");
+  });
+
+  it("renders grouped-only results under their component names", () => {
+    render(root, {
+      ...result,
+      recipe: {
+        servings: null,
+        ingredientLines: [],
+        instructions: [],
+        components: [
+          {
+            name: "Tomato Sauce",
+            ingredientLines: ["2 cups crushed tomatoes"],
+            instructions: ["Cook until thick."],
+          },
+          {
+            name: "Finish",
+            ingredientLines: ["Fresh basil"],
+            instructions: [],
+          },
+        ],
+        adjustmentExplanations: [],
+      },
+    });
+
+    const sauce = container.querySelector('[aria-label="Tomato Sauce"]');
+    expect(sauce?.textContent).toContain("2 cups crushed tomatoes");
+    expect(sauce?.textContent).toContain("Cook until thick.");
+    expect(
+      container.querySelector('[aria-label="Finish"]')?.textContent,
+    ).toContain("Fresh basil");
+    expect(
+      container.querySelector('[aria-label="recipes.ingredients"]'),
+    ).toBeNull();
+    expect(
+      container.querySelector('[aria-label="recipes.instructions"]'),
+    ).toBeNull();
+  });
+
+  it("keeps flat lines and grouped lines together in mixed results", () => {
+    render(root, {
+      ...result,
+      recipe: {
+        ...result.recipe,
+        ingredientLines: ["1 tablespoon oil"],
+        instructions: [],
+        components: [
+          {
+            name: "Marinade",
+            ingredientLines: ["1 teaspoon ginger"],
+            instructions: ["Whisk together."],
+          },
+        ],
+      },
+    });
+
     expect(container.textContent).toContain("1 tablespoon oil");
     expect(container.textContent).toContain("1 teaspoon ginger");
     expect(container.textContent).toContain("Whisk together.");
+    expect(
+      container.querySelector('[aria-label="recipes.instructions"]'),
+    ).toBeNull();
+  });
+
+  it("rejects malformed optional components at the renderer boundary", () => {
+    render(root, {
+      ...result,
+      recipe: {
+        ...result.recipe,
+        components: [
+          { name: "Broken", ingredientLines: ["valid"], instructions: [3] },
+        ],
+      },
+    });
+
+    expect(container.querySelector('[role="alert"]')?.textContent).toBe(
+      "recipes.scaledResultInvalid",
+    );
+    expect(fixture.queryEnabled).toEqual([false]);
   });
 });
