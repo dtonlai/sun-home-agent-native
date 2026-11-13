@@ -147,6 +147,37 @@ describe("recipe scaling action surface", () => {
     });
   });
 
+  it("requires the validated result action and excludes Content writes", async () => {
+    const surface = await asUser(OWNER, () =>
+      resolveSurface(
+        scalingDetails({
+          availableActionNames: [
+            "get-document",
+            "submit-recipe-scaling-result",
+            "create-document",
+            "update-document",
+          ],
+        }),
+      ),
+    );
+    expect(surface?.allowedActionNames).toEqual([
+      "get-document",
+      "submit-recipe-scaling-result",
+    ]);
+    expect(surface?.allowedActionNames).not.toContain("create-document");
+    expect(surface?.allowedActionNames).not.toContain("update-document");
+
+    await expect(
+      asUser(OWNER, () =>
+        resolveSurface(
+          scalingDetails({ availableActionNames: ["get-document"] }),
+        ),
+      ),
+    ).rejects.toMatchObject({
+      errorCode: "recipe_scaling_actions_unavailable",
+    });
+  });
+
   it("rejects caller-minted scopes and binds a valid grant once to thread and available turn/message IDs", async () => {
     await asUser(OWNER, async () => {
       expect((await getThread(THREAD_ID))?.scope).toBeNull();
