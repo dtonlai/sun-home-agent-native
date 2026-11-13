@@ -3,6 +3,7 @@ import {
   registerActionChatRenderer,
   type ToolRendererProps,
 } from "@agent-native/toolkit/app/chat/agentkit-chat";
+import { registerToolRenderer } from "@agent-native/toolkit/app/chat/chat";
 import type { Document } from "@shared/api";
 import { useEffect, useMemo, useSyncExternalStore } from "react";
 
@@ -26,21 +27,59 @@ export type RecipeScalingResultData = {
   };
 };
 
-let currentResult: RecipeScalingResultData | null = null;
+let nextViewId = 0;
+let currentResult: {
+  viewId: number;
+  result: RecipeScalingResultData;
+} | null = null;
+let activeRequest: {
+  viewId: number;
+  requestId: string;
+  documentId: string;
+  factor: number;
+  widgetId?: string;
+} | null = null;
 const listeners = new Set<() => void>();
 
 function notifyResultChange() {
   for (const listener of listeners) listener();
 }
 
-export function clearRecipeScalingResult() {
-  if (currentResult === null) return;
-  currentResult = null;
+export function createRecipeScalingViewId() {
+  nextViewId += 1;
+  return nextViewId;
+}
+
+export function clearRecipeScalingResult(viewId?: number) {
+  const shouldClearResult =
+    currentResult !== null &&
+    (viewId === undefined || currentResult.viewId === viewId);
+  const shouldClearRequest =
+    activeRequest !== null &&
+    (viewId === undefined || activeRequest.viewId === viewId);
+  if (!shouldClearResult && !shouldClearRequest) return;
+  if (shouldClearResult) currentResult = null;
+  if (shouldClearRequest) activeRequest = null;
   notifyResultChange();
 }
 
-export function useRecipeScalingResult() {
-  return useSyncExternalStore(
+export function beginRecipeScalingRequest(input: {
+  viewId: number;
+  requestId: string;
+  documentId: string;
+  factor: number;
+}) {
+  currentResult = null;
+  activeRequest = { ...input };
+  notifyResultChange();
+}
+
+export function useRecipeScalingResult(
+  viewId: number,
+  documentId: string,
+  factor: number | null,
+) {
+  const result = useSyncExternalStore(
     (listener) => {
       listeners.add(listener);
       return () => listeners.delete(listener);
@@ -48,6 +87,11 @@ export function useRecipeScalingResult() {
     () => currentResult,
     () => null,
   );
+  return result?.viewId === viewId &&
+    result.result.documentId === documentId &&
+    result.result.factor === factor
+    ? result.result
+    : null;
 }
 
 function parseResult(value: unknown): RecipeScalingResultData | null {
@@ -117,22 +161,71 @@ function parseResult(value: unknown): RecipeScalingResultData | null {
 }
 
 export function RecipeScalingResult({ context }: ToolRendererProps) {
-  // The action declares this renderer only for its successful result. Check
-  // status as well so a running or failed tool can never publish output.
+  const requestAtRender = activeRequest;
   const result = useMemo(
     () => parseResult(context.resultJson),
     [context.resultJson],
   );
   useEffect(() => {
-    if (context.status === "completed") {
-      if (!result) return;
-      currentResult = result;
-      notifyResultChange();
+    const request = requestAtRender;
+    const widgetId = context.widgetId;
+    if (
+      !request ||
+      activeRequest?.requestId !== request.requestId ||
+      !widgetId ||
+      context.args.documentId !== request.documentId ||
+      context.args.factor !== request.factor
+    ) {
+      return;
     }
-  }, [context.status, result]);
+
+    if (
+      context.status === "running" &&
+      context.isRunning &&
+      context.isActiveTail
+    ) {
+      request.widgetId = widgetId;
+      return;
+    }
+
+    if (context.status === "failed" && request.widgetId === widgetId) {
+      activeRequest = null;
+      notifyResultChange();
+      return;
+    }
+
+    if (
+      context.status !== "completed" ||
+      request.widgetId !== widgetId ||
+      !result ||
+      result.documentId !== request.documentId ||
+      result.factor !== request.factor
+    ) {
+      return;
+    }
+
+    currentResult = { viewId: request.viewId, result };
+    activeRequest = null;
+    notifyResultChange();
+  }, [
+    context.args.documentId,
+    context.args.factor,
+    requestAtRender,
+    context.isActiveTail,
+    context.isRunning,
+    context.status,
+    context.widgetId,
+    result,
+  ]);
 
   return null;
 }
+
+registerToolRenderer({
+  id: "sun-home.recipe-scaling-result-progress",
+  match: "submit-recipe-scaling-result",
+  Component: RecipeScalingResult,
+});
 
 registerActionChatRenderer({
   id: RECIPE_SCALING_RENDERER,

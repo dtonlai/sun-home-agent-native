@@ -15,7 +15,9 @@ import { QueryErrorState } from "@/components/QueryErrorState";
 import { parseRecipeContent } from "@/components/recipes/recipe-content";
 import { RecipeMarkdown } from "@/components/recipes/RecipeMarkdown";
 import {
+  beginRecipeScalingRequest,
   clearRecipeScalingResult,
+  createRecipeScalingViewId,
   RecipeScalingComparison,
   useRecipeScalingResult,
 } from "@/components/recipes/RecipeScalingResult";
@@ -82,12 +84,11 @@ function RecipeDetails({
   const scaleMutation = useActionMutation("start-recipe-scaling");
   const [scaleChoice, setScaleChoice] = useState("2");
   const [customFactor, setCustomFactor] = useState("");
+  const [viewId] = useState(createRecipeScalingViewId);
   const [scaleError, setScaleError] = useState<string | null>(null);
   const [isPreparingScaling, setIsPreparingScaling] = useState(false);
   const [scaleWasRequested, setScaleWasRequested] = useState(false);
-  const [isGenerating, sendScalingRequest, , observedRun] =
-    useAgentChatGenerating();
-  const latestScalingResult = useRecipeScalingResult();
+  const [isGenerating, sendScalingRequest] = useAgentChatGenerating();
   const customFactorNumber = Number(customFactor);
   const factor =
     scaleChoice === "custom"
@@ -95,6 +96,15 @@ function RecipeDetails({
         ? customFactorNumber
         : null
       : Number(scaleChoice);
+  const latestScalingResult = useRecipeScalingResult(
+    viewId,
+    document.id,
+    factor,
+  );
+  useEffect(() => {
+    clearRecipeScalingResult(viewId);
+    return () => clearRecipeScalingResult(viewId);
+  }, [document.id, viewId]);
   const content = parseRecipeContent(document.content ?? "");
   const title = document.title?.trim() || fallbackTitle;
   const hasBody = Boolean(
@@ -103,11 +113,18 @@ function RecipeDetails({
   const requestScaling = async () => {
     if (factor === null || !Number.isFinite(factor) || factor <= 0) return;
     setScaleError(null);
-    clearRecipeScalingResult();
+    clearRecipeScalingResult(viewId);
     setScaleWasRequested(false);
     setIsPreparingScaling(true);
     try {
       const grant = await scaleMutation.mutateAsync({
+        documentId: document.id,
+        factor,
+      });
+      const submitMessageId = crypto.randomUUID();
+      beginRecipeScalingRequest({
+        viewId,
+        requestId: submitMessageId,
         documentId: document.id,
         factor,
       });
@@ -119,23 +136,21 @@ function RecipeDetails({
           grantToken: grant.grantToken,
         },
         submit: true,
+        submitMessageId,
         openSidebar: true,
       });
       setScaleWasRequested(true);
     } catch (error) {
+      clearRecipeScalingResult(viewId);
       setScaleError(actionErrorMessage(error) ?? t("recipes.scalingError"));
     } finally {
       setIsPreparingScaling(false);
     }
   };
-  const scalingResult =
-    latestScalingResult?.documentId === document.id
-      ? latestScalingResult
-      : null;
+  const scalingResult = latestScalingResult;
   const scalingPending =
     isPreparingScaling || (scaleWasRequested && isGenerating);
-  const scalingFailed =
-    scaleWasRequested && observedRun && !isGenerating && !scalingResult;
+  const scalingFailed = scaleWasRequested && !isGenerating && !scalingResult;
 
   return (
     <article className="min-w-0">
@@ -170,7 +185,10 @@ function RecipeDetails({
             aria-label={t("recipes.scaleFactor")}
             className="h-9 rounded-md border border-input bg-background px-3 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             value={scaleChoice}
+            disabled={isPreparingScaling || isGenerating}
             onChange={(event) => {
+              clearRecipeScalingResult(viewId);
+              setScaleWasRequested(false);
               setScaleChoice(event.currentTarget.value);
               setScaleError(null);
             }}
@@ -196,8 +214,11 @@ function RecipeDetails({
               min="0"
               step="any"
               inputMode="decimal"
+              disabled={isPreparingScaling || isGenerating}
               value={customFactor}
               onChange={(event) => {
+                clearRecipeScalingResult(viewId);
+                setScaleWasRequested(false);
                 setCustomFactor(event.currentTarget.value);
                 setScaleError(null);
               }}

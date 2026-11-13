@@ -36,6 +36,7 @@ const fixture = vi.hoisted(() => ({
     observedRun: false,
   },
   rendererRegistrations: [] as Array<Record<string, unknown>>,
+  toolRendererRegistrations: [] as Array<Record<string, unknown>>,
 }));
 
 vi.mock("@agent-native/core/client/hooks", () => ({
@@ -101,6 +102,13 @@ vi.mock("@agent-native/core/client/agent-chat", () => ({
 vi.mock("@agent-native/toolkit/app/chat/agentkit-chat", () => ({
   registerActionChatRenderer: (registration: Record<string, unknown>) => {
     fixture.rendererRegistrations.push(registration);
+    return vi.fn();
+  },
+}));
+
+vi.mock("@agent-native/toolkit/app/chat/chat", () => ({
+  registerToolRenderer: (registration: Record<string, unknown>) => {
+    fixture.toolRendererRegistrations.push(registration);
     return vi.fn();
   },
 }));
@@ -494,7 +502,7 @@ describe("Recipes library", () => {
       factor: 2,
     });
     expect(fixture.sendCalls).toEqual([
-      {
+      expect.objectContaining({
         message: "recipes.scalingRequest",
         context: JSON.stringify({ documentId: "recipe-stable-id", factor: 2 }),
         actionScope: {
@@ -502,8 +510,9 @@ describe("Recipes library", () => {
           grantToken: "grant-token-with-at-least-forty-characters-1234567890",
         },
         submit: true,
+        submitMessageId: expect.any(String),
         openSidebar: true,
-      },
+      }),
     ]);
   });
 
@@ -534,18 +543,33 @@ describe("Recipes library", () => {
     });
     expect(container.textContent).not.toContain("recipes.scaledRecipe");
 
-    const registration = fixture.rendererRegistrations[0];
-    const Renderer = registration?.Component as ComponentType<{
+    const actionRegistration = fixture.rendererRegistrations[0];
+    const runRegistration = fixture.toolRendererRegistrations[0];
+    const ActionRenderer = actionRegistration?.Component as ComponentType<{
+      context: Record<string, unknown>;
+    }>;
+    const RunRenderer = runRegistration?.Component as ComponentType<{
       context: Record<string, unknown>;
     }>;
     await act(async () =>
       root.render(
         <>
           <RecipesLibrary />
-          <Renderer
+          <RunRenderer
             context={{
               toolName: "submit-recipe-scaling-result",
-              args: {},
+              args: { documentId: "recipe-stable-id", factor: 2 },
+              resultJson: undefined,
+              isRunning: true,
+              isActiveTail: true,
+              widgetId: "tool-live:chat-ui",
+              status: "running",
+            }}
+          />
+          <ActionRenderer
+            context={{
+              toolName: "submit-recipe-scaling-result",
+              args: { documentId: "recipe-stable-id", factor: 2 },
               resultJson: {
                 documentId: "recipe-stable-id",
                 factor: 2,
@@ -557,6 +581,7 @@ describe("Recipes library", () => {
                 },
               },
               isRunning: false,
+              widgetId: "tool-live:chat-ui",
               status: "completed",
             }}
           />
@@ -566,6 +591,14 @@ describe("Recipes library", () => {
     expect(container.textContent).toContain("recipes.scaledRecipe");
     expect(container.textContent).toContain("8 tomatoes");
     expect(container.textContent).toContain("4 tomatoes");
+
+    const scaleChoice = container.querySelector("select");
+    act(() => {
+      if (!scaleChoice) return;
+      scaleChoice.value = "1.5";
+      scaleChoice.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    expect(container.textContent).not.toContain("recipes.scaledRecipe");
   });
 
   it("offers retry after a run stops without a validated result", async () => {
