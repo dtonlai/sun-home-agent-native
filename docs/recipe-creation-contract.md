@@ -1,141 +1,161 @@
 # Content backed recipe creation contract
 
-**Status:** Draft for Michael and product owner review. No implementation or live Content changes are included.
+**Status:** Revised draft for technical review. No implementation or live Content changes are included.
 
-**Evidence version:** `@agent-native/core` 0.226.0, pinned by `package.json` and `pnpm-lock.yaml`. Evidence was read from the installed package docs/source in `node_modules/.pnpm/@agent-native+core@0.226.0_.../node_modules/@agent-native/core`, the repository's registered Content actions, and the existing Recipes library. No database was opened or modified for this contract.
-
-### Version-matched references
-
-| Reference | Evidence used |
-|---|---|
-| Core 0.226.0 `docs/content/actions-overview.mdx` | `defineAction()` is one operation exposed to UI hooks and agent tools; callers use action surfaces rather than importing another action's `run()`. |
-| Core 0.226.0 `docs/content/client-data.mdx` and `actions-access-control.mdx` | UI uses `useActionMutation`/`callAction`; access policies and authorization run on normal dispatch surfaces. |
-| Core 0.226.0 `docs/content/actions-defining.mdx` | Direct `action.run()` receives schema validation only, not the normal dispatch wrappers. |
-| Core 0.226.0 `docs/content/template-content-databases.mdx` | Collection rows are full Content pages; forms validate fields and write title/body/properties as a single submission. |
-| Repository `actions/create-document.ts` | Supported page creation accepts a caller-supplied ID, exact space target, title/body and preserves replay by request digest; returns `urlPath`. |
-| Repository `actions/submit-content-database-form.ts` | Current form action checks editor access, validates live form schema, writes page/membership/properties in one transaction, verifies the saved row, and has no caller idempotency key. |
-| Repository `actions/list-documents.ts`, `actions/_document-discovery-query.ts`, `app/components/recipes/RecipesLibrary.tsx` | Current page discovery and Recipes selection/read path; collection root exclusion is not collection-row exclusion. |
-| Repository `.agents/skills/document-editing/references/databases.md` | Current Content collection property semantics, form submission, row identities, retries for the row mutation action, and property read/query surfaces. |
+**Evidence version:** `@agent-native/core` 0.226.0, pinned by `package.json` and `pnpm-lock.yaml`. Evidence below was read from the installed package docs/source and this repository's registered Content actions. No database was opened or modified.
 
 ## Recommendation
 
-For the first creation contract, create ordinary Content pages in the caller-authorized `Recipes` space and keep the full recipe in the page body. Do not introduce a collection until the supported write path can atomically and idempotently create a page, body, and metadata properties. The currently registered form action writes the row/body/properties atomically but has no idempotency key; a response lost after commit can produce a duplicate on retry. The ordinary `create-document` action already supports a caller-supplied ID and rejects a replay with a different request digest.
+Keep the requested Recipes collection/table in scope. In the existing authorized `Recipes` Content space, create new recipes as rows in one ordinary Content collection. Each row is itself a Content page: `documents.content` remains the canonical complete Content NFM recipe, while collection properties provide structured metadata and tag filtering. Existing ordinary recipe pages remain readable and searchable as a fallback; do not move, rewrite, migrate, or require them to be collection rows.
 
-Use an explicit open `additionalMarkdown` field for recipe content the structured fields do not model. Keep named groups independent for ingredients and instructions: they may have different names and counts. A free-text serving value such as `2-3 servings` stays text; it must not be coerced to a number. All source links, notes, tags, cuisine, groups, and extra details are serialized into the Content body, so there is no second canonical store and old pages remain readable through the existing recipe path. Search can match the saved body; structured filtering on tags/cuisine is deferred until its schema and write semantics are approved.
+The existing public actions do not provide one idempotent body-plus-property create: `submit-content-database-form` is atomic but has no idempotency receipt, while `add-database-item` has a durable receipt but starts with an empty body. The currently supported retryable fallback is a two-operation saga:
 
-If the owner later approves a manually configured ordinary Content collection in the existing authorized `Recipes` space, each row remains a full Content page. Candidate properties are `Servings` (text), `Cuisine` (text), and `Tags` (owner choice; see Open decisions). Do not create the collection, alter its schema, move existing pages, or migrate data automatically.
+1. Call `add-database-item` with the exact target and current schema revision, property values, and a stable idempotency key. It creates the row and properties transactionally and returns a durable receipt with stable item/document IDs, read-back values, payload digest, and `applied`/`replayed` outcome.
+2. Read the returned row with `get-document`. Only when its body is literally empty, call `edit-document` with the returned `baseRevision`, a stable second idempotency key derived from the same creation intent, and `initializeContent` containing the complete serialized Content NFM recipe. `initializeContent` is the supported body initialization operation for an empty page; its receipt is independently replayable. Read the row again and verify both body and properties before reporting completion.
 
-The current library uses `list-documents` for its list and `get-document` for the selected full body. `list-documents` with `documentType: "page"` excludes collection root pages, but its current query does not exclude active collection row documents; rows are documents too. That compatibility expectation is source-backed but not yet proven end-to-end for this library. Add a regression proving both legacy plain pages and future row pages appear before relying on it.
+This safely reconciles a lost response or retry without making a duplicate row or overwriting an intervening edit, but it is **not atomic across the two actions**: between operations the row exists with properties and an empty body. On retry, the row-create key must be reused with exactly the same payload. If the body is still empty, initialize it; if it already equals the intended body, treat it as complete; if it is different and nonempty, stop and report a conflict for review. Never replace a changed body to make the create retry pass.
 
-## Proposed create operation
+Technical recommendation for Michael: for one shared `create-recipe` action with one atomic receipt, extract the current `submit-content-database-form` transaction into a repository-owned service and add idempotency there. The action already validates the live form, checks editor access, writes the row/body/properties in one transaction, and verifies read-back. After authentication, exact target resolution, and editor authorization, check/replay an existing receipt before current form/property validation; for a new key, validate the live form and property schema. Then write a canonical request digest and receipt in the same transaction as the row using the existing `content_database_row_mutation_receipts` table and its unique `(database_id, idempotency_key)` index. Bind target, stable form view, title, body, and submitted properties in the digest. Store a create-time body hash in the receipt result. A new registered `create-recipe` action can call this service with the recipe-specific schema; the UI and agent both dispatch that one action. Keep `submit-content-database-form` on the same service. This reuses repository-owned code and existing SQL schema; it does not modify Agent Native framework internals or require a migration. It needs focused review for replay ordering, form/schema drift, receipt payload binding, and result compatibility.
 
-The product-facing operation should be one registered action named `create-recipe`, called by both the Recipes UI and the in-app agent. It must return the stable Content document identity and link. It must not scale, rewrite, or otherwise mutate any other recipe.
+Do not use the generic `databaseRowRevision()` as the body integrity check: it hashes row ID, document ID, title, and properties only. `databaseMutationPayloadDigest()` currently hashes only row-create inputs, which do not contain body content. The form-service receipt must bind the full form/recipe intent and record a separate body hash without changing the meaning of later row revisions.
 
-### Input
+## Proposed create-recipe contract
+
+The exact action schema depends on the write-seam review, but the domain input and output should be:
 
 ```ts
+type RecipeGroup<T> = { name?: string | null; entries: T[] };
+
 type CreateRecipeInput = {
-  title: string;                 // required, trimmed, 1–500 characters
-  servings?: string | null;      // optional free text/ranges, e.g. "2-3 servings"
-  ingredientGroups: Array<{      // zero or more, independently named/repeatable
-    name?: string | null;        // absent/empty means ungrouped
-    items: string[];
-  }>;
-  instructionGroups: Array<{     // independent from ingredient group names/count
-    name?: string | null;
-    steps: string[];
-  }>;
-  notes?: Array<{ title: string; markdown: string }>;
-  tags?: string[];
-  cuisine?: string | null;       // free text, not a fixed taxonomy
+  target: {
+    spaceId: string;
+    databaseId: string;
+    databaseDocumentId: string;
+  };                              // exact target from authorized collection read
+  formViewId: string;             // recipe form view in the live collection schema
+  expectedSchemaRevision: string; // fresh get-content-database mutationContract
+  idempotencyKey: string;         // stable key for one unchanged create intent
+  title: string;                  // required, 1–500 characters
+  servings?: string | null;       // free text, e.g. "2-3 servings"
+  ingredientGroups: RecipeGroup<string>[];
+  instructionGroups: RecipeGroup<string>[];
+  notes?: Array<{ title: string; nfm: string }>;
+  tags: string[];
+  cuisine?: string | null;        // free text unless owner selects a taxonomy
   sourceLinks?: Array<{ title?: string; url: string }>;
-  additionalMarkdown?: string;   // complete extra content, appended unchanged
-  idempotencyKey: string;        // stable value mapped to create-document.id
+  additionalNfm?: string;         // preserve unknown/arbitrary Content body content
 };
 
 type CreateRecipeResult = {
-  documentId: string;            // stable Content document ID
-  spaceId: string;
-  collectionId: null;            // plain-page v1 contract
-  itemId: null;
-  urlPath: string;               // returned Content page path, normally /page/<id>
+  itemId: string;
+  documentId: string;
+  urlPath: string;
+  receiptId: string;
+  idempotency: { key: string; result: "applied" | "replayed"; payloadDigest: string };
+  readback: { verified: true; title: string; propertyValues: Record<string, unknown>; bodyHash: string };
 };
 ```
 
-Validation rejects an empty title, non-HTTP(S) URLs, overlong text, invalid empty groups, or a missing idempotency key. Do not impose an ingredient/instruction grammar or finite group-name enum. `additionalMarkdown` preserves extra authored content that has no typed field. The create action formats all accepted fields into ordinary Markdown once; later reads use the stored Content body, not a reserialization of the input.
+Validation rejects empty/overlong titles, malformed or non-HTTP(S) source URLs, empty tag labels, invalid empty groups, stale schema revisions, unknown property options, and reuse of an idempotency key with a different target or payload. Group names are free text: ingredient and instruction groups are independent and may differ in name and count. Servings stays text and preserves ranges/units. Notes are repeatable and titled. The body serializer emits Content's NFM accepted by `edit-document.initializeContent`; `notes[].nfm` and `additionalNfm` are already Content NFM and are retained unchanged. The serializer must never flatten or discard groups, notes, links, tags, cuisine, or `additionalNfm`.
 
-### Storage mapping
+## Storage mapping
 
-| Input | Content storage | Notes |
+| Input | Content storage | Behavior |
 |---|---|---|
-| `title` | `documents.title` | Content page title; not copied into another recipe record. |
-| `servings` | `documents.content` | Serialize as a Serving Size/Servings label with the value unchanged, including ranges and units. |
-| `ingredientGroups` | `documents.content` | Preserve input order. Each named group is a Markdown subsection under Ingredients; ungrouped items remain in the Ingredients section. Group names are arbitrary strings. |
-| `instructionGroups` | `documents.content` | Preserve input order independently of ingredient groups. Do not align/fuzzy-match different names or require a matching group. |
-| `notes` | `documents.content` | Each item becomes a titled subsection with its Markdown content preserved. Repeated titles remain separate and ordered. |
-| `sourceLinks` | `documents.content` | Serialize as Markdown links using the supplied title or URL as link text; validate URL protocol and preserve every supplied link. |
-| `tags`, `cuisine` | `documents.content` | Preserve each authored label as readable metadata in the page body. They are searchable as body text, not structured collection properties in v1. Controlled taxonomy and exact filtering remain deferred. |
-| `additionalMarkdown` | `documents.content` | Append the exact supplied Markdown after the generated recipe sections, separated only by a Markdown blank line. Never discard unknown content. |
-| Content ownership and visibility | Content document in the selected space | Use Content's normal owner/org/visibility and access rules. Do not widen visibility to make household recipes appear. |
+| `title` | `documents.title` and collection row title | One stable Content page title. |
+| `servings` | Text property `Servings` and recipe NFM body | Preserve exact free text, including `2-3 servings`; do not parse to a number. |
+| `ingredientGroups` | `documents.content` | Ordered Ingredients section; named subsections stay independently named. |
+| `instructionGroups` | `documents.content` | Ordered Instructions section; do not align groups to ingredient groups or require matching names. |
+| `notes` | `documents.content` | Repeated titled sections in supplied order; preserve each NFM body. |
+| `tags` | Multi-select property `Tags` and recipe NFM body | Property supports collection filters/search; an early body `Tags:` line supports global document search. Values must already exist in the property option catalog unless owner approves a controlled option-creation flow. |
+| `cuisine` | Text property `Cuisine` and recipe NFM body | Use text to avoid silently imposing a cuisine taxonomy; option-backed select remains an owner choice. |
+| `sourceLinks` | `documents.content` | Serialize as Content NFM links with supplied title or URL as link text; preserve all links. |
+| `additionalNfm` | `documents.content` | Append unchanged after generated sections, separated by one NFM blank block; do not parse and rebuild it. |
+| access and shares | Content row page and collection | Use exact caller-authorized target and normal collection editor/access checks. Never accept caller-provided owner, org, or visibility. |
 
-The selected Recipes space ID is resolved from the caller-authorized `list-content-spaces` result; never hardcode an ID. A missing or ambiguous exact-name `Recipes` space returns setup guidance/selection instead of provisioning or moving anything. The create action must use the caller's access scope and preserve Content's default-private behavior.
+The page body is canonical for the recipe's complete content. Properties are indexes; they may not replace the body. Collection setup and option-list changes are separate reviewed Content actions, not side effects of recipe creation.
 
-## Action surface, authorization, and write failure
+## Collection discovery and library compatibility
 
-Agent Native 0.226.0 documents that one `defineAction()` is the single implementation exposed to the UI hooks and agent tool. The Recipes UI should call the same `create-recipe` action with `useActionMutation`; the agent should receive its schema as a tool. The action checks that the caller can create in the exact authorized `Recipes` space and, for a collection row, has editor access to that collection. It accepts no caller-supplied owner, visibility, or share list. Content continues to enforce owner/share access; a guessed, inaccessible, or wrong-space ID must fail closed.
+- Resolve the exact authorized `Recipes` space at runtime using `list-content-spaces`; do not hardcode IDs. Discover the existing recipe collection by its stable ID through Content collection actions. If none exists, return setup guidance; do not create a space/collection automatically. If multiple eligible collections exist, require selection among those authorized results.
+- Read `get-content-database` immediately before a create and pass its exact mutation target and `schemaRevision` to `add-database-item`. The standard row mutation validates access and schema, normalizes properties, commits row and properties in one transaction, and stores an idempotency receipt. Reusing the same key and exact payload replays; a different payload conflicts.
+- Existing ordinary pages remain in their current space and keep their stable IDs. `list-documents(documentType: "page", spaceId)` excludes collection root pages but current source does not exclude active collection-row documents. Therefore list and `get-document` can be the common fallback read path for both, but add a mixed legacy-page/row regression before shipping.
+- The current Recipes library lists documents and gets the selected page body; it does not yet query collection properties. The next iteration must read collection rows/properties for structured tags and cuisine while retaining ordinary pages. Do not claim parity from the existing page list alone.
 
-There is an unresolved framework seam: the version-matched Actions docs describe `callAction()` as a client API and advise callers to use action surfaces rather than import another action's `run()` implementation. They do not document server-side action-to-action dispatch. The Actions docs also say a direct `action.run()` call gets schema validation only, not the normal dispatch wrappers. Therefore a `create-recipe` wrapper must not be implemented by importing `create-document.run`, `submit-content-database-form.run`, or by making an undocumented HTTP self-call. Before implementation, Michael must select one supported seam:
+## Search: verified behavior
 
-1. Use the existing registered `create-document` action directly from both UI and agent, with the recipe-to-Markdown mapping performed before the action call; or
-2. Approve a small Content-owned shared write service exposed through a registered `create-recipe` action, with the same access checks, attribution, transaction, receipts, and retry guarantees as the existing Content actions.
+The prior draft's broad claim that recipe body/tag text is indexed needs this distinction:
 
-Do not add a second write path that manipulates Content tables while this seam is undecided.
+- **Recipe body and tags written in the body:** `server/db/index.ts` registers Content's document search resource and projects each document's `title`, `description`, and `content` into the Core index as title, summary, and body. `actions/search-documents.ts` uses that index when ready and has a SQL fallback against those same document columns. Its action description states that title/description match anywhere and body terms match from word starts. Thus body text, including an early visible `Tags: ...` line, is searchable by `search-documents` for ordinary pages and collection row pages, subject to access and `hideFromSearch`. This is not an unlimited-body guarantee: Core 0.226.0 `buildSearchVector()` applies Postgres position and vector-size budgets and may collapse positions or omit excess distinct words. Keeping tags near the start of the body and in the collection property avoids relying on a late-body tag for structured search.
+- **Tag values stored only as collection properties:** they are not part of `documentSearchIndex` and are not searched by `search-documents`. Collection `tableQuery.search` does search row title and property values: `shared/database-query.ts` `itemSearchText()` concatenates the row title with each property value, and `applyContentDatabaseTableQuery()` applies that text match. It does not include the recipe body. For the requested searchable tags, store tags both as the `Tags` multi-select property (structured filtering/table search) and in the recipe body (global search), then verify through both actions.
+- **Legacy recipes:** body tags/cuisine are found by `search-documents`; existing plain pages have no collection property values, so they cannot satisfy structured `Tags` filters without parsing or backfill. No backfill is proposed. Search must make this distinction visible rather than silently dropping legacy recipes.
+- **Unknown tags:** the current form action rejects unknown select/status/multi-select options. Use a preconfigured option set or an owner-approved option-management flow. Do not append an option and then submit a row as if that multi-action sequence were atomic.
 
-The registered `submit-content-database-form` action is an attractive collection-row primitive: it validates the live form and writes title, body, and property values in one database transaction, then reads the row back. It inherits collection access and shares. But its current input has no idempotency key; a lost response followed by retry can create a duplicate. `add-database-item` has a stable idempotency receipt but does not provide the same atomic full-body plus property form contract. Thus the collection path cannot claim safe retry with current actions. Add idempotency to the supported write boundary before adopting it. A failed transaction leaves no partial row; a response lost after commit remains an ambiguous outcome and must be looked up/reconciled before retry.
+## Action composition and partial-failure alternatives
 
-The plain-page `create-document` action accepts an optional pre-generated `id`, explicit `spaceId`/`spaceName`, title, and Markdown content. Its implementation stores a digest of the creation request: replaying the same caller-supplied ID and same request returns the same page; reusing the ID with a different request returns a conflict. Pass `preserveLeadingTitleHeading: true` when the body includes a matching leading H1, so the action does not strip it. A dedicated recipe action should expose equivalent caller-stable retry behavior and return the created document ID even when a later projection step is pending.
+Agent Native Core 0.226.0's `docs/content/actions-overview.mdx` says actions are the shared UI/agent operation, but its documented `callAction()` is a client surface. `docs/content/actions-defining.mdx` says direct `action.run()` gets schema validation only, not normal dispatch wrappers. Do not implement a server wrapper that imports and calls `add-database-item.run()` or `edit-document.run()`, and do not make an undocumented self-HTTP request.
 
-## Library compatibility, tags, and search
+| Route | Guarantees | Limits and recovery |
+|---|---|---|
+| Existing `submit-content-database-form` plus idempotent service extraction | Smallest atomic seam: preserve its live form validation/access/transaction/read-back; add key/digest replay and write a body-hash receipt in the same transaction using the existing `content_database_row_mutation_receipts` table. A dedicated `create-recipe` action and the existing form action can call the shared service. | Requires recipe form/property configuration and careful replay-before-current-schema-validation behavior. Result must bind exact target, intent, current form selection, and body hash; reuse of a key for a changed payload must conflict. No migration is expected from the existing table, but confirm against installed schema before implementation. |
+| `add-database-item` then `edit-document` | Both are registered actions with separate idempotent receipts. `add-database-item` binds target/schema/payload and stable item/document IDs; `edit-document` uses `get-document`'s base revision plus stable key and only initializes an empty body. It can reconcile after a handoff/retry without duplicating a row or overwriting a changed body. | Two commits can leave a visible incomplete row. `edit-document` has `http: false`; Core 0.226.0 says only the agent and CLI can call it. This is not a shared browser UI path or a single `create-recipe` operation. |
+| Extend the app-owned row-create service with body content | Alternate single-transaction seam: extend `createDatabaseRow()`/`createInsideTransaction()` to create the row, properties, and initial body under its existing idempotency receipt, and include a body hash in the receipt read-back. No framework internals need modification. | Broader generic row-mutation change than extracting the existing form transaction. `databaseRowRevision()` currently excludes body; do not silently redefine it. Review body revision/history/collaboration invariants and compatibility with existing `add-database-item` callers. |
 
-- Existing Recipes pages remain in the exact authorized space and keep their stable IDs. Do not move, rewrite, or require migration of them.
-- `list-documents` returns document IDs and metadata, not collection property values. Its `documentType: "page"` filter excludes collection root documents, not row memberships, so new collection row pages should be listable alongside old ordinary pages. This is supported by the current query implementation; cover it with an action-level regression before shipping.
-- The current Recipes library can read either kind by the same stable ID with `get-document`. Metadata chips and filtering need an explicit collection read path; `query-content-database-items` supports row properties and table constraints, while `list-documents` alone does not expose those values. The UI work must merge/present legacy page results and collection rows without dropping either class.
-- `search-content-database-rows` is title-only. Collection property filtering belongs to `query-content-database-items` with property definitions and typed filters. Plain legacy pages have no recipe properties, so `Tags`/`Cuisine` filters cannot be complete across old and new records without a body parser/search policy or a backfill. Do not silently claim tag search over legacy pages.
-- A fixed multi-select tag catalog makes filtering reliable but an unrecognized tag is rejected by `submit-content-database-form`; adding options is a separate collection-schema mutation and can succeed before a later create fails. Do not dynamically append a tag and then claim one atomic create. If owner wants arbitrary user-defined tags, either use a free-text property with explicitly weaker filtering or design an idempotent schema-plus-row workflow with recovery.
+The two-action route is a supported recovery fallback for callers able to use the agent action surface. It is not the final UI/agent parity path: `edit-document` declares `http: false`, so Core 0.226.0 docs say only the agent and CLI can call it; browser `useActionMutation`/`callAction` cannot dispatch it over HTTP. The single registered `create-recipe` action backed by the extracted idempotent form service is the recommended UI/agent path. Do not label the current form action idempotent or the two-operation saga atomic.
 
-## Risks and compatibility limits
+## Authorization and failure rules
 
-1. **Action composition/idempotency:** No documented server-side action chaining; current form submission lacks an idempotency receipt. This is the primary implementation blocker for the preferred collection-backed path.
-2. **Legacy discovery:** Current code indicates row documents pass `documentType: "page"`, but the full Recipes library behavior must be proven with a mixed fixture before the assumption ships.
-3. **Search consistency:** Adding structured properties to new rows does not classify old pages. Search needs an agreed rule for tags/cuisine found only in body text versus metadata properties.
-4. **Tag vocabulary:** Multi-select requires configured options; a free-text field offers less exact filtering. Product owner must choose the intended semantics.
-5. **Non-loss guarantee:** If a form or parser constructs the body from known fields, unknown source content can be lost. `additionalMarkdown` must be appended unchanged, and the serializer must retain every supplied group, note, tag, cuisine value, and source link.
-6. **Space permissions:** Two users do not automatically share a private personal space. The action must use the caller's authorized space and existing Content sharing; it must not widen visibility to make household recipes appear.
-7. **Setup and migrations:** Creating a collection, modifying live collection schema, backfilling old pages, or changing production DB state is not part of this contract and needs separate review/approval.
+- Creation requires an authenticated caller with editor/create permission on the exact Recipes collection. The agent and UI use the same registered action schema and receive the same access failures.
+- Do not bypass Content actions/access checks with direct SQL in the UI, agent, or a new parallel recipe store. Any app-owned mutation service must reuse the checked row-target, schema-revision, share inheritance, attribution, and receipt behavior already in the row mutation code.
+- A failed single-transaction mutation creates no row. A successful receipt is verified before reporting success. A two-action saga may leave a row with properties and an empty body; retry it with the same keys, and do not report a complete recipe until body and properties are read back.
+- If an intervening edit makes the row body nonempty/different before initialization, preserve it and return a conflict for review. Never auto-overwrite the source or delete the partial row as cleanup.
+- Private-by-default remains intact. Two household users sharing no Content space do not gain access from recipe membership alone; existing Content sharing and authorized-space rules decide access.
 
-## Verification plan for implementation
+## Risks and limits
 
-1. Action schema: title bounds, exact Markdown preservation, free-text servings such as `2-3 servings`, arbitrary repeated component names, repeatable titled notes, tag/source-link bounds, and required idempotency key.
-2. Write behavior: one successful create returns stable `documentId` and `/page/<id>` path; retrying the exact intent returns/reconciles the same document; changed payload with reused key fails; no duplicate rows after a simulated lost response.
-3. Atomicity: force property validation/transaction failure and verify no page, membership, or partial property values remain; verify successful body and properties by Content read-back.
-4. Library compatibility: with a legacy plain recipe page and a new collection row in the same authorized Recipes space, paginate `list-documents(documentType: "page")`, select each stable ID, and `get-document`; both bodies must be readable and unchanged.
-5. Privacy: caller with no authorized Recipes space sees setup guidance; inaccessible IDs and a row from another space are rejected; private space access stays private; authorized sharing remains governed by Content.
-6. Search: verify title/body search for legacy pages; verify collection tag/cuisine filters for rows; verify and document whether legacy tags/cuisine are searchable without a migration.
-7. Parity: call the same registered create action through UI and agent with equivalent input and assert identical validation, permissions, storage mapping, and output shape.
+1. `submit-content-database-form` has good transaction boundaries but lacks retry receipts. Extracting its transaction and reusing the existing receipt table is the recommended smallest atomic seam; replay must happen after authorization but before current form/property validation so an already committed intent survives later schema changes.
+2. Composing the two public actions is recoverable for agent/CLI callers but not one transaction and can expose incomplete rows. Because `edit-document` has `http: false`, it cannot by itself provide browser UI and agent parity.
+3. Extending the local generic row receipt to include body state must avoid claiming that later user edits invalidate the original create receipt; store the create-time body hash and leave current-body verification to read-back. The existing `databaseRowRevision()` deliberately omits body content, so the revision contract must be reviewed before changing it.
+4. Collection `tableQuery.search` searches property values and title, not body; global `search-documents` searches indexed body and not property values, with Core search-vector size/position limits. Recipe search needs both semantics.
+5. Tags multi-select depends on a product-owned vocabulary. Arbitrary tag onboarding is not currently atomic with row creation.
+6. Existing-page migration/backfill, production schema changes, collection provisioning, and option-list changes remain out of scope without separate review/owner approval.
 
-## Follow-on implementation tasks
+## Implementation verification plan
+
+1. Row action: same exact idempotency key/payload replays the same item/document IDs and receipt; same key with a changed target/property/body conflicts.
+2. Single-transaction path: replay a stored receipt before revalidating a changed live form; same key and same input returns the same row, same key and changed target/body/properties conflicts. Inject a transaction failure and prove no row, body, properties, or receipt persist; successful response includes verified property values and the create-time body hash.
+3. If shipping the two-action fallback: simulate loss after row creation and after body initialization; retry both keys and prove no duplicate, then read row/body/property values. Simulate a third-party body edit between steps and prove initialization fails without overwriting it.
+4. Search evidence: find tags written only in body using `search-documents`; find property tags via `query-content-database-items` table search; prove `search-documents` alone does not promise property-only matches and table search does not include body text.
+5. Library compatibility: paginate the exact Recipes space with one existing ordinary page and one collection row, then open both by stable ID and read their full bodies. Verify property metadata is loaded for the row and is absent-but-not-failing for the ordinary page.
+6. Privacy/parity: unauthorized collection/space and inaccessible IDs fail closed; UI and agent use same action and return identical IDs/receipt/error behavior.
+
+## Follow-on task boundaries
 
 | Task | Owner | Depends on |
 |---|---|---|
-| Decide the write seam, idempotency behavior, and tag semantics; approve this contract | Michael + product owner | This review |
-| Implement one registered create operation using the approved Content write boundary; validate and return stable ID/link | Dwight | Contract approval; action composition seam |
-| Add mixed legacy-page/collection-row retrieval and property-backed search only if the collection path is approved | Dwight + Jim | Collection choice, idempotent write support, approved search semantics |
-| Build create UI using the same action and preserve body as supplied; show useful permission/validation errors | Jim | Shared action schema |
-| Add action and UI tests for validation, atomicity/retries, access, mixed library discovery, tags, and UI/agent parity | Dwight + Jim | Stable action and read contracts |
+| Review the recommended single-transaction seam vs supported two-action recovery route | Michael | This contract revision |
+| Extract the form transaction into an app-owned service, add durable idempotent receipts/body hash, and define the `create-recipe` action | Dwight | Michael's technical approval; collection target/property contract |
+| Add Recipes collection row/property reads and searchable tag UI while retaining ordinary page fallback | Dwight + Jim | Stable collection identity and approved tag semantics |
+| Build creation UI using the same action schema and Content collection setup guidance | Jim | Shared action contract |
+| Add DB/action/UI tests for idempotency, failure recovery, search paths, access, and legacy-page compatibility | Dwight + Jim | Implementation contracts |
 
-## Open decisions for owner
+## Product choices still open
 
-1. **Structured collection properties:** Recommended to defer. Should v1 stay as ordinary pages until Content exposes a supported idempotent body-plus-properties action? This needs no setup and preserves current library behavior, with weaker structured tag/cuisine filtering. Approving a collection now adds setup, retrieval/UI work, and an idempotency gap.
-2. **Tags:** Should tags be a controlled multi-select vocabulary (unknown tags rejected), free-form text (weaker filtering), or arbitrary tags with a separately designed idempotent schema update? Recommended interim choice: free text or body-only until an owner-owned vocabulary is provided.
-3. **Cuisine:** Is cuisine free text (recommended, no taxonomy lock-in) or a controlled option list?
-4. **Write action seam:** May implementation extend/promote a Content-owned registered action to `create-recipe`, or must the Recipes action remain separate? Core 0.226.0 docs do not establish server-side action chaining, so this must be settled before implementation.
+1. **Tag vocabulary:** Should `Tags` be a fixed controlled multi-select list, or should users be allowed to add arbitrary tags? Recommendation: begin with a short owner-approved vocabulary; adding options during recipe creation needs its own idempotent design.
+2. **Cuisine:** Use a free-text property by default; confirm whether the owner wants a controlled cuisine list.
+3. **Collection selection/setup:** Confirm the intended existing collection if more than one authorized collection is present, and who performs one-time collection/property setup. No automatic provisioning or migration is proposed.
+
+## Source evidence index
+
+Installed Core 0.226.0 docs/source: `docs/content/actions-overview.mdx` (shared action surface), `docs/content/client-data.mdx` (UI action calls), `docs/content/actions-access-control.mdx` (dispatch authorization), `docs/content/actions-defining.mdx` (direct `run()` behavior), `docs/content/template-chat-developers.mdx` (the `http: false` endpoint exclusion), `docs/content/template-content-databases.mdx` (document-backed rows/forms), and `dist/search/tokenize.js` `buildSearchVector()` (Postgres position and vector-size limits).
+
+Repository source evidence and exact implementation points (line numbers refer to this revision):
+
+- `actions/add-database-item.ts:74` calls `createDatabaseRow()`; `shared/api.ts` `ContentDatabaseRowMutationReceipt` defines target, schema revision, stable row IDs, digest, outcome, and property read-back.
+- `actions/_database-row-mutation.ts:1013-1027` computes the row-create digest without body content; `:1081-1122` builds receipt read-back; `:1142-1193` replays only matching digests; `:1195-1224` inserts the receipt; `:1245-1253` defines create inputs; `:1543-1610` checks replay before schema validation and creates the row plus receipt in a transaction. `createInsideTransaction()` writes an empty document body at `:1281-1297`; `databaseRowRevision()` at `:254-268` hashes row/document IDs, title, and property values only.
+- `actions/submit-content-database-form.ts:42-85` declares form input without an idempotency key; `:420-430` registers an authenticated agent-visible action; `:471-480` checks editor access; `:586-606` begins a transaction and rejects form drift; `:686-710` creates body/title and row; `:825-855` verifies persisted body/properties and returns stable IDs/link. Its live form and options are processed at `:490-579`, before the transaction.
+- `server/db/schema.ts:902-940` defines `contentDatabaseRowMutationReceipts` with target, key, payload digest, schema revision, row IDs, and `resultJson`, plus unique `(databaseId, idempotencyKey)` index; no new table is required for a form-service receipt if the stored result remains compatible.
+- `actions/edit-document.ts:129-139,298-304` defines `initializeContent`, requires `baseRevision` and a caller key in its description, and sets `http: false`. `actions/_document-edit-mutation.ts:230-405` implements replay and empty-body initialization behavior.
+- `server/db/index.ts:69-92` `documentSearchIndex.load()` projects document title/description/content as title/summary/body. `actions/search-documents.ts:159-171` SQL fallback matches title/description/content (or title-only when requested); `:217-234` selects the registered index when ready and falls back to direct SQL when unavailable.
+- `shared/database-query.ts:707-723,1155-1169` shows `itemSearchText()` concatenating row title and property values and `applyContentDatabaseTableQuery()` using that for `tableQuery.search`; it does not add row body text.
+- `actions/_document-discovery-query.ts` `documentDiscoveryWhere()` filters `documentType: "page"` by excluding active collection root documents, not collection membership rows.
