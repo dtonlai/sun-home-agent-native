@@ -140,18 +140,45 @@ uses AI SDK 7 and Zod 4. This task therefore adds adapter `^3.1.0`. No provider
 key is needed to confirm the package version and picker filtering logic, and no
 credential or provider request was used.
 
-The reproducible lockfile check is
-`pnpm install --lockfile-only --frozen-lockfile --ignore-scripts`; it completed
-successfully with pnpm 10.14.0 (`Done in 508ms`, exit 0). A full local install
-could not be completed: `pnpm add @openrouter/ai-sdk-provider@^2.9.1` failed
-linking with `ENOENT` for a package-store file; an offline retry of
-`pnpm install --offline --frozen-lockfile --ignore-scripts` failed with `EBADF`
-reading a package-store file. Inspecting the store with `pnpm store status`
-also reports `ENOENT` for a missing index entry. The preexisting dependencies
-were moved into `node_modules/.ignored` by pnpm during the failed install.
-Runtime package registration and a live chat/provider check remain unverified
-until the damaged store is repaired. No app configuration or
-`server/plugins/agent-chat.ts` change is indicated by the source evidence.
+The reproducible lockfile check
+`pnpm install --lockfile-only --frozen-lockfile --ignore-scripts` completed
+with pnpm 10.14.0 (`Done in 518ms`, exit 0). The original store is damaged:
+`pnpm add @openrouter/ai-sdk-provider@^2.9.1` failed with `ERR_PNPM_ENOENT`
+while linking a Vitest package from a missing store file;
+`pnpm install --offline --frozen-lockfile --ignore-scripts` failed with
+`ERR_PNPM_EBADF` while reading another store file; `pnpm store status` reported
+`ENOENT` for a missing `@esbuild/aix-ppc64@0.25.12` store index. Those attempts
+moved preexisting dependencies into `node_modules/.ignored`.
+
+Runtime package recognition was then verified in a detached temporary worktree
+with a separate store, without starting the app server:
+
+- From `/tmp/dwight-b1-t05-verify`,
+  `pnpm install --frozen-lockfile --ignore-scripts --store-dir /tmp/b1-t05-isolated-pnpm-store`
+  exited 0 (`resolved 904, reused 904, added 904`; done in 4s).
+- This Core registry check exited 0:
+
+  ```sh
+  node --input-type=module -e 'import { registerBuiltinEngines, getAgentEngineEntry, isAgentEnginePackageInstalled } from "@agent-native/core/agent/engine"; registerBuiltinEngines(); const entry = getAgentEngineEntry("ai-sdk:openrouter"); if (!entry) throw new Error("Core did not register ai-sdk:openrouter"); const installed = isAgentEnginePackageInstalled(entry); console.log(JSON.stringify({engine: entry.name, installPackage: entry.installPackage, packageInstalled: installed})); if (!installed) process.exit(1);'
+  ```
+
+  Output: `{"engine":"ai-sdk:openrouter","installPackage":"ai @openrouter/ai-sdk-provider","packageInstalled":true}`.
+- Core engine resolution itself also exited 0:
+
+  ```sh
+  node --input-type=module -e 'import { registerBuiltinEngines, resolveEngine } from "@agent-native/core/agent/engine"; registerBuiltinEngines(); const engine = await resolveEngine({ engineOption: "ai-sdk:openrouter", apiKey: "verification-placeholder" }); console.log(JSON.stringify({name: engine.name, label: engine.label, defaultModel: engine.defaultModel}));'
+  ```
+
+  Output: `{"name":"ai-sdk:openrouter","label":"Openrouter (AI SDK)","defaultModel":"openai/gpt-6-luna"}`. This exercises Core's engine resolution check that previously threw the reported missing optional package error.
+- A direct adapter smoke check imported `createOpenRouter`, constructed the
+  DeepSeek Flash model object using a verification placeholder key, and exited
+  0. It made no provider request and used no credential.
+
+The successful Core registry check confirms the missing-optional-packages gate
+is cleared with the declared adapter. Placeholder keys were used only to build
+local objects; no provider request or authenticated chat was made. No app
+configuration or `server/plugins/agent-chat.ts` change is indicated by the
+source evidence.
 
 ## Evidence consulted
 
