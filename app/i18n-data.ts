@@ -1451,6 +1451,7 @@ const enUS = {
       "Scale the selected recipe by {{factor}}× and return the validated result without editing Content.",
     scalingError: "Could not start recipe scaling.",
     originalRecipe: "Original recipe",
+    scaledRecipePending: "Scaled recipe",
     scaledRecipe: "Scaled recipe ({{factor}}×)",
     adjustments: "Adjustment notes",
     scaledResultInvalid: "The scaling result could not be displayed.",

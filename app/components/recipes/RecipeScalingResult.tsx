@@ -8,6 +8,7 @@ import type { Document } from "@shared/api";
 import { useEffect, useMemo, useSyncExternalStore } from "react";
 
 import { RecipeMarkdown } from "@/components/recipes/RecipeMarkdown";
+import { Button } from "@/components/ui/button";
 
 const RECIPE_SCALING_RENDERER = "sun-home.recipe-scaling-result";
 
@@ -265,13 +266,22 @@ function RecipeLines({
 export function RecipeScalingComparison({
   result,
   source,
+  pending = false,
+  error,
+  onRetry,
 }: {
-  result: RecipeScalingResultData;
+  result: RecipeScalingResultData | null;
   source: Pick<Document, "id" | "title" | "content">;
+  pending?: boolean;
+  error?: string | null;
+  onRetry?: () => void;
 }) {
   const t = useT();
+  const scaledTitle = result
+    ? t("recipes.scaledRecipe", { factor: String(result.factor) })
+    : t("recipes.scaledRecipePending");
   return (
-    <div className="mt-6 grid min-w-0 gap-4 border-t border-border pt-5 md:grid-cols-2">
+    <div className="mt-5 grid min-w-0 gap-4 md:grid-cols-2">
       <section
         aria-label={t("recipes.originalRecipe")}
         className="min-w-0 rounded-md border border-border p-4"
@@ -283,52 +293,72 @@ export function RecipeScalingComparison({
         <RecipeMarkdown documentId={source.id} content={source.content ?? ""} />
       </section>
       <section
-        aria-label={t("recipes.scaledRecipe", {
-          factor: String(result.factor),
-        })}
+        aria-label={scaledTitle}
         className="min-w-0 rounded-md border border-border p-4"
       >
-        <h3 className="mb-3 text-base font-semibold">
-          {t("recipes.scaledRecipe", { factor: String(result.factor) })}
-        </h3>
-        {result.recipe.servings ? (
-          <p className="mb-4 text-sm text-muted-foreground">
-            <span className="font-medium text-foreground">
-              {t("recipes.servings")}:
-            </span>
-            {result.recipe.servings}
-          </p>
-        ) : null}
-        <RecipeLines
-          title={t("recipes.ingredients")}
-          lines={result.recipe.ingredientLines}
-        />
-        <RecipeLines
-          title={t("recipes.instructions")}
-          lines={result.recipe.instructions}
-          ordered
-        />
-        {result.recipe.components?.map((component, index) => (
-          <section key={`${index}-${component.name}`} className="mb-5">
-            <h4 className="mb-2 break-words text-sm font-semibold">
-              {component.name}
-            </h4>
+        <h3 className="mb-3 text-base font-semibold">{scaledTitle}</h3>
+        {result ? (
+          <>
+            {result.recipe.servings ? (
+              <p className="mb-4 text-sm text-muted-foreground">
+                <span className="font-medium text-foreground">
+                  {t("recipes.servings")}:
+                </span>
+                {result.recipe.servings}
+              </p>
+            ) : null}
             <RecipeLines
               title={t("recipes.ingredients")}
-              lines={component.ingredientLines}
+              lines={result.recipe.ingredientLines}
             />
             <RecipeLines
               title={t("recipes.instructions")}
-              lines={component.instructions}
+              lines={result.recipe.instructions}
               ordered
             />
-          </section>
-        ))}
-        {result.recipe.adjustmentExplanations.length > 0 ? (
-          <RecipeLines
-            title={t("recipes.adjustments")}
-            lines={result.recipe.adjustmentExplanations}
-          />
+            {result.recipe.components?.map((component, index) => (
+              <section key={`${index}-${component.name}`} className="mb-5">
+                <h4 className="mb-2 break-words text-sm font-semibold">
+                  {component.name}
+                </h4>
+                <RecipeLines
+                  title={t("recipes.ingredients")}
+                  lines={component.ingredientLines}
+                />
+                <RecipeLines
+                  title={t("recipes.instructions")}
+                  lines={component.instructions}
+                  ordered
+                />
+              </section>
+            ))}
+            {result.recipe.adjustmentExplanations.length > 0 ? (
+              <RecipeLines
+                title={t("recipes.adjustments")}
+                lines={result.recipe.adjustmentExplanations}
+              />
+            ) : null}
+          </>
+        ) : error ? (
+          <div role="alert" className="space-y-3">
+            <p className="text-sm text-destructive">{error}</p>
+            <Button type="button" size="sm" variant="outline" onClick={onRetry}>
+              {t("recipes.retry")}
+            </Button>
+          </div>
+        ) : pending ? (
+          <div
+            role="status"
+            aria-live="polite"
+            aria-busy="true"
+            className="space-y-3"
+          >
+            <p className="text-sm text-muted-foreground">
+              {t("recipes.scalingInProgress")}
+            </p>
+            <div className="h-4 w-2/3 animate-pulse rounded bg-muted" />
+            <div className="h-20 w-full animate-pulse rounded bg-muted" />
+          </div>
         ) : null}
       </section>
     </div>

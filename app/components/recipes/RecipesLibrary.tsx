@@ -149,8 +149,19 @@ function RecipeDetails({
   };
   const scalingResult = latestScalingResult;
   const scalingPending =
-    isPreparingScaling || (scaleWasRequested && isGenerating);
-  const scalingFailed = scaleWasRequested && !isGenerating && !scalingResult;
+    !scalingResult &&
+    (isPreparingScaling || (scaleWasRequested && isGenerating));
+  const scalingFailed =
+    Boolean(scaleError) ||
+    (scaleWasRequested && !isGenerating && !scalingResult);
+  const comparisonError =
+    scaleError ??
+    (scalingFailed ? t("recipes.scalingResultUnavailable") : null);
+  const comparisonOpen =
+    isPreparingScaling ||
+    scaleWasRequested ||
+    scalingResult !== null ||
+    scalingFailed;
 
   return (
     <article className="min-w-0">
@@ -246,43 +257,19 @@ function RecipeDetails({
         >
           {scalingPending ? t("recipes.scalingPending") : t("recipes.scale")}
         </Button>
-        {scaleError ? (
-          <p role="alert" className="w-full text-sm text-destructive">
-            {scaleError}
-          </p>
-        ) : null}
       </div>
 
-      {scalingPending ? (
-        <p
-          role="status"
-          aria-live="polite"
-          className="mt-4 text-sm text-muted-foreground"
-        >
-          {t("recipes.scalingInProgress")}
-        </p>
-      ) : null}
-      {scalingFailed ? (
-        <div className="mt-4 flex flex-wrap items-center gap-3" role="alert">
-          <p className="text-sm text-destructive">
-            {t("recipes.scalingResultUnavailable")}
-          </p>
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            disabled={scaleMutation.isPending || isPreparingScaling}
-            onClick={() => void requestScaling()}
-          >
-            {t("recipes.retry")}
-          </Button>
-        </div>
-      ) : null}
-      {scalingResult ? (
-        <RecipeScalingComparison result={scalingResult} source={document} />
+      {comparisonOpen ? (
+        <RecipeScalingComparison
+          result={scalingResult}
+          source={document}
+          pending={scalingPending}
+          error={comparisonError}
+          onRetry={() => void requestScaling()}
+        />
       ) : null}
 
-      {hasBody && !scalingResult ? (
+      {hasBody && !comparisonOpen ? (
         <div className="mt-5 grid min-w-0 gap-6 md:grid-cols-2">
           <section
             aria-labelledby="recipe-ingredients-heading"
@@ -650,6 +637,7 @@ export function RecipesLibrary() {
               />
             ) : selectedDocument ? (
               <RecipeDetails
+                key={selectedDocument.id}
                 document={selectedDocument}
                 fallbackTitle={selectedDocument.title || t("recipes.untitled")}
               />

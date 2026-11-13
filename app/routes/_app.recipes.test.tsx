@@ -516,9 +516,16 @@ describe("Recipes library", () => {
     ]);
   });
 
-  it("shows in-progress state while the scoped agent run is active", () => {
+  it("opens both comparison panes immediately while the scaling grant is pending", async () => {
     setupSelectedRecipe();
     render(root);
+    let finishGrant: ((value: Record<string, unknown>) => void) | undefined;
+    fixture.scaleMutation.mutateAsync.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finishGrant = resolve;
+        }),
+    );
 
     const scaleButton = [...container.querySelectorAll("button")].find(
       (button) => button.textContent?.includes("recipes.scale"),
@@ -526,10 +533,31 @@ describe("Recipes library", () => {
     act(() => {
       scaleButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
-    render(root);
 
-    expect(container.textContent).toContain("recipes.scalingInProgress");
-    expect(container.textContent).toContain("recipes.scale");
+    const originalPane = container.querySelector(
+      '[aria-label="recipes.originalRecipe"]',
+    );
+    const scaledPane = container.querySelector(
+      '[aria-label="recipes.scaledRecipePending"]',
+    );
+    expect(originalPane?.textContent).toContain("Tomato Soup");
+    expect(originalPane?.textContent).toContain("4 tomatoes");
+    expect(
+      scaledPane?.querySelector('[aria-busy="true"]')?.textContent,
+    ).toContain("recipes.scalingInProgress");
+    expect(container.querySelector(".md\\:grid-cols-2")).not.toBeNull();
+    expect(
+      container.querySelectorAll('[data-testid="recipe-markdown"]'),
+    ).toHaveLength(1);
+
+    await act(async () => {
+      finishGrant?.({
+        grantToken: "grant-token-with-at-least-forty-characters-1234567890",
+        documentId: "recipe-stable-id",
+        factor: 2,
+        expiresAt: "2026-11-10T00:00:00.000Z",
+      });
+    });
   });
 
   it("shows the comparison only after the completed result action succeeds", async () => {
@@ -541,7 +569,11 @@ describe("Recipes library", () => {
     await act(async () => {
       scaleButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
-    expect(container.textContent).not.toContain("recipes.scaledRecipe");
+    expect(container.textContent).toContain("recipes.scalingInProgress");
+    const pendingScaledPane = container.querySelector(
+      '[aria-label="recipes.scaledRecipePending"]',
+    );
+    expect(pendingScaledPane).not.toBeNull();
 
     const actionRegistration = fixture.rendererRegistrations[0];
     const runRegistration = fixture.toolRendererRegistrations[0];
@@ -591,6 +623,13 @@ describe("Recipes library", () => {
     expect(container.textContent).toContain("recipes.scaledRecipe");
     expect(container.textContent).toContain("8 tomatoes");
     expect(container.textContent).toContain("4 tomatoes");
+    expect(container.textContent).not.toContain("recipes.scalingInProgress");
+    expect(
+      container.querySelector('[aria-label^="recipes.scaledRecipe"]'),
+    ).toBe(pendingScaledPane);
+    expect(
+      container.querySelectorAll('[data-testid="recipe-markdown"]'),
+    ).toHaveLength(1);
 
     const scaleChoice = container.querySelector("select");
     act(() => {
@@ -598,7 +637,7 @@ describe("Recipes library", () => {
       scaleChoice.value = "1.5";
       scaleChoice.dispatchEvent(new Event("change", { bubbles: true }));
     });
-    expect(container.textContent).not.toContain("recipes.scaledRecipe");
+    expect(container.textContent).not.toContain("8 tomatoes");
   });
 
   it("offers retry after a run stops without a validated result", async () => {
@@ -615,9 +654,18 @@ describe("Recipes library", () => {
     fixture.chatRun.stopReason = "stopped";
     render(root);
 
-    expect(container.textContent).toContain("recipes.scalingResultUnavailable");
-    expect(container.textContent).toContain("recipes.retry");
-    expect(container.textContent).not.toContain("recipes.scaledRecipe");
+    const scaledPane = container.querySelector(
+      '[aria-label="recipes.scaledRecipePending"]',
+    );
+    expect(scaledPane?.textContent).toContain(
+      "recipes.scalingResultUnavailable",
+    );
+    expect(scaledPane?.textContent).toContain("recipes.retry");
+    expect(
+      container.querySelector('[aria-label="recipes.originalRecipe"]')
+        ?.textContent,
+    ).toContain("4 tomatoes");
+    expect(container.textContent).not.toContain("8 tomatoes");
   });
 
   it("does not dispatch when grant creation fails", async () => {
