@@ -119,6 +119,37 @@ handled for this audit.
   scoped scale turn. Keep original/scaled comparison and mobile behavior as a
   separate UI acceptance check.
 
+## OpenRouter chat setup finding (2026-11-13)
+
+This checkout uses Core 0.226.0 and `ai` 7.x. Core's
+`dist/agent/engine/ai-sdk-engine.js` loads `@openrouter/ai-sdk-provider`
+dynamically and marks the OpenRouter engine as not installed when that
+optional package is absent. `dist/client/chat-model-groups.js` filters out
+engines with `packageInstalled === false`; therefore, the absent adapter
+explains both the reported engine error and why OpenRouter models do not appear
+in chat. This is upstream behavior, not a missing app model list or an
+app-owned setting. Adding the supported adapter registers the engine and
+exposes Core's built-in OpenRouter recommended model catalog. The chat picker
+then shows that group only when the provider is configured (or is the current
+engine), consistent with Core's setup flow.
+
+The installed Core Chat template declares adapter 2.x alongside AI SDK 6.x,
+while this app already uses AI SDK 7.x. Registry metadata confirms adapter
+3.1.0 has peer requirements `ai ^7.0.0` and `zod ^3.25.76 || ^4.1.8`; the app
+uses AI SDK 7 and Zod 4. This task therefore adds adapter `^3.1.0`. No provider
+key is needed to confirm the package version and picker filtering logic, and no
+credential or provider request was used.
+
+The package/lockfile change is reproducible with `pnpm install --frozen-lockfile`
+at the lockfile level. A full local install could not be completed in this
+sandbox: pnpm failed while linking the existing dependency tree with `ENOENT`,
+then an offline retry failed reading a package-store file with `EBADF`. The
+preexisting dependencies were moved into `node_modules/.ignored` by pnpm during
+the failed install. Runtime package registration and a live chat/provider check
+remain unverified until dependencies can be installed successfully. No app
+configuration or `server/plugins/agent-chat.ts` change is indicated by the
+source evidence.
+
 ## Evidence consulted
 
 - Installed Core version: `node_modules/@agent-native/core/package.json`
@@ -140,6 +171,11 @@ handled for this audit.
   `dist/secrets/register-framework-secrets.js`, and
   `dist/server/credential-provider.js`; client handoff fields are typed in
   `dist/client/agent-chat.d.ts`.
+- OpenRouter dependency and chat visibility: Core 0.226.0's
+  `dist/templates/chat/package.json`, `dist/agent/engine/ai-sdk-engine.js`,
+  `dist/client/chat-model-groups.js`, `dist/agent/model-config.js`, and
+  `dist/scripts/agent-engines/list-agent-engines.js`; npm registry peer
+  metadata for `@openrouter/ai-sdk-provider` 3.1.0.
 - Requested local skills: `.agents/skills/agent-native-docs/SKILL.md`,
   `.agents/skills/delegate-to-agent/SKILL.md`,
   `.agents/skills/actions/SKILL.md`, `.agents/skills/secrets/SKILL.md`,
