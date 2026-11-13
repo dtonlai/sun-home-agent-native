@@ -129,7 +129,12 @@ function RecipeDetails({
         factor,
       });
       sendScalingRequest({
-        message: t("recipes.scalingRequest", { factor: String(factor) }),
+        message: [
+          t("recipes.scalingRequest", { factor: String(factor) }),
+          "This is a scoped recipe scaling request. First call get-document with the exact documentId in the request context and use that saved recipe as the source.",
+          "Scale it for the requested factor, reasoning about non-linear adjustments such as seasoning, temperature, cooking time, equipment capacity, and batching.",
+          "Complete the scaling by calling submit-recipe-scaling-result with its full validated schema, using the exact documentId and factor from context. Do not say the recipe was validated or the comparison is complete unless that action succeeds. If reading or submitting fails, say no scaled comparison was produced.",
+        ].join("\n\n"),
         context: JSON.stringify({ documentId: document.id, factor }),
         actionScope: {
           kind: "sun-home-recipe-scaling",

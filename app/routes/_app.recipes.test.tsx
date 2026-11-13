@@ -503,7 +503,9 @@ describe("Recipes library", () => {
     });
     expect(fixture.sendCalls).toEqual([
       expect.objectContaining({
-        message: "recipes.scalingRequest",
+        message: expect.stringContaining(
+          "This is a scoped recipe scaling request. First call get-document",
+        ),
         context: JSON.stringify({ documentId: "recipe-stable-id", factor: 2 }),
         actionScope: {
           kind: "sun-home-recipe-scaling",
@@ -665,6 +667,33 @@ describe("Recipes library", () => {
       container.querySelector('[aria-label="recipes.originalRecipe"]')
         ?.textContent,
     ).toContain("4 tomatoes");
+    expect(container.textContent).not.toContain("8 tomatoes");
+  });
+
+  it("does not treat a prose-only completed run as a scaled result", async () => {
+    setupSelectedRecipe();
+    render(root);
+    const scaleButton = [...container.querySelectorAll("button")].find(
+      (button) => button.textContent?.includes("recipes.scale"),
+    );
+    await act(async () => {
+      scaleButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+
+    // A completed chat turn with no result action may contain prose, but it
+    // cannot publish a comparison or clear the retryable no-result state.
+    fixture.chatRun.isGenerating = false;
+    fixture.chatRun.observedRun = true;
+    fixture.chatRun.stopReason = null;
+    render(root);
+
+    const scaledPane = container.querySelector(
+      '[aria-label="recipes.scaledRecipePending"]',
+    );
+    expect(scaledPane?.textContent).toContain(
+      "recipes.scalingResultUnavailable",
+    );
+    expect(scaledPane?.textContent).toContain("recipes.retry");
     expect(container.textContent).not.toContain("8 tomatoes");
   });
 

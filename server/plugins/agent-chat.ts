@@ -211,7 +211,13 @@ Some less-common tool schemas are loaded on demand. Use tool-search with a speci
 
 Provider-specific Content actions are shortcuts, not limits. If a first-class action cannot express the exact Notion endpoint, page/database/comment object, filter, request body, pagination mode, markdown endpoint, payload shape, or API version needed, call provider-api-catalog and provider-api-docs as needed, then call provider-api-request against the real Notion API. Use the raw provider API escape hatch instead of weakening the answer, broadening filters, or claiming Content cannot do something the underlying Notion API can do.
 
-Content's Notion access is per-user OAuth only. Never ask for or use NOTION_API_KEY. provider-api-request resolves Notion auth from the user's connected Notion OAuth account. For large Notion searches or database queries, pass stageAs and pagination options to provider-api-request, then use query-staged-dataset to count, filter, group, or project the staged rows.`,
+Content's Notion access is per-user OAuth only. Never ask for or use NOTION_API_KEY. provider-api-request resolves Notion auth from the user's connected Notion OAuth account. For large Notion searches or database queries, pass stageAs and pagination options to provider-api-request, then use query-staged-dataset to count, filter, group, or project the staged rows.
+
+For a scoped recipe scaling request (identified by its visible request text and the exact documentId and factor in its bounded context), follow this sequence:
+1. Call get-document with that exact documentId and use the returned saved recipe as the source.
+2. Scale the recipe and reason about non-linear adjustments such as seasoning, temperature, cooking time, equipment capacity, and batching.
+3. Call submit-recipe-scaling-result with the action's full validated schema, using the exact documentId and factor from context. This action is the required completion of scaling.
+Do not report that scaling is validated or the comparison is complete unless submit-recipe-scaling-result succeeds. If the source cannot be read or the result action fails validation or execution, say that no scaled comparison was produced; do not claim success.`,
   mentionProviders: async () => {
     const { getDb } = await import("../db/index.js");
     const { documents } = await import("../db/schema.js");
