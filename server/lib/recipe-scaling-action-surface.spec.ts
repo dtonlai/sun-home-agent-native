@@ -2,7 +2,7 @@ import { rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { getDbExec } from "@agent-native/core/db";
+import { getDbExec, withMigrationRuntime } from "@agent-native/core/db";
 import {
   createThread,
   getThread,
@@ -62,8 +62,11 @@ beforeAll(async () => {
   const dbModule = await import("../db/index.js");
   getDb = dbModule.getDb;
   schema = dbModule.schema;
-  const dbPlugin = (await import("../plugins/db.js")).default;
-  await dbPlugin(undefined as never);
+  const database = await import("../plugins/db.js");
+  await withMigrationRuntime(async () => {
+    await database.runContentMigrations(null);
+    await database.runContentSourceMigrations(null);
+  });
   await getDbExec().execute(`CREATE TABLE IF NOT EXISTS organizations (
     id TEXT PRIMARY KEY, name TEXT NOT NULL, created_by TEXT NOT NULL, created_at BIGINT NOT NULL,
     identity_authority TEXT, identity_id TEXT
