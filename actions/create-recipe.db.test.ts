@@ -18,7 +18,7 @@ type Schema = typeof import("../server/db/schema.js");
 let getDb: () => any;
 let schema: Schema;
 let createRecipe: typeof import("./create-recipe.js").default;
-let queryDatabaseItems: typeof import("./query-content-database-items.js").default;
+let searchDocuments: typeof import("./search-documents.js").default;
 let recipesSpaceId: string;
 let recipesDatabaseId: string;
 let recipesDocumentId: string;
@@ -33,8 +33,7 @@ beforeAll(async () => {
   getDb = dbModule.getDb;
   schema = dbModule.schema;
   createRecipe = (await import("./create-recipe.js")).default;
-  queryDatabaseItems = (await import("./query-content-database-items.js"))
-    .default;
+  searchDocuments = (await import("./search-documents.js")).default;
   const plugin = (await import("../server/plugins/db.js")).default;
   await plugin(undefined as any);
 }, 60_000);
@@ -87,7 +86,7 @@ async function seedRecipesCollection() {
             type: "form",
             formQuestions: [
               { key: "name", enabled: true, required: true },
-              { key: tagPropertyId, enabled: true, required: true },
+              { key: tagPropertyId, enabled: true, required: false },
               { key: cuisinePropertyId, enabled: true, required: false },
               { key: servingsPropertyId, enabled: true, required: false },
             ],
@@ -224,19 +223,15 @@ describe("create-recipe", () => {
     expect(result.urlPath).toContain(encodeURIComponent(result.documentId));
 
     const search = await asUser(OWNER, () =>
-      queryDatabaseItems.run({
-        databaseId: recipesDatabaseId,
-        limit: 100,
-        tableQuery: {
-          search: "family favorite",
-          filters: [],
-          sorts: [],
-          filterMode: "and",
-        },
+      searchDocuments.run({
+        query: "family favorite",
+        spaceId: recipesSpaceId,
+        limit: 20,
+        offset: 0,
       }),
     );
-    expect("items" in search && search.items.map((item) => item.id)).toContain(
-      result.itemId,
+    expect(search.documents.map((document) => document.id)).toContain(
+      result.documentId,
     );
   });
 
@@ -315,13 +310,12 @@ describe("create-recipe", () => {
     expect(rows).toHaveLength(0);
   });
 
-  it("requires Tags to remain an ordinary text property", async () => {
+  it("requires Tags to be one unambiguous Text property", async () => {
     await getDb()
       .update(schema.documentPropertyDefinitions)
       .set({ type: "multi_select" })
       .where(eq(schema.documentPropertyDefinitions.id, tagPropertyId));
     const args = await input();
-
     await expect(
       asUser(OWNER, () => createRecipe.run(args as any)),
     ).rejects.toMatchObject({ errorCode: "recipe_collection_schema_mismatch" });
@@ -403,10 +397,10 @@ describe("create-recipe", () => {
     ).rejects.toMatchObject({ errorCode: "recipe_space_required" });
   });
 
-  it("rejects invalid URLs and empty tags before creating a row", async () => {
+  it("rejects malformed URLs and empty tags before creating a row", async () => {
     const args = await input({
       idempotencyKey: `invalid-${Date.now()}`,
-      sourceLinks: [{ url: "javascript:alert(1)" }],
+      sourceLinks: [{ url: "not a valid URL" }],
       tags: [" "],
     });
     await expect(

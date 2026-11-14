@@ -90,6 +90,18 @@ describe("recipe creation input and Content NFM serialization", () => {
         sourceLinks: [{ url: "javascript:alert(1)" }],
       }).success,
     ).toBe(false);
+    expect(() =>
+      createRecipeInputSchema.safeParse({
+        ...valid,
+        sourceLinks: [{ url: "not a valid URL" }],
+      }),
+    ).not.toThrow();
+    expect(
+      createRecipeInputSchema.safeParse({
+        ...valid,
+        sourceLinks: [{ url: "not a valid URL" }],
+      }).success,
+    ).toBe(false);
     expect(
       createRecipeInputSchema.safeParse({
         ...valid,

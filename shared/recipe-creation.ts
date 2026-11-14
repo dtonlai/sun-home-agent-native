@@ -22,6 +22,16 @@ const recipeGroupSchema = z
 
 const recipeTagSchema = z.string().trim().min(1).max(80);
 
+function safeSourceHref(value: string): string | undefined {
+  try {
+    const url = new URL(value);
+    if (url.protocol !== "http:" && url.protocol !== "https:") return undefined;
+    return url.toString().replaceAll("(", "%28").replaceAll(")", "%29");
+  } catch {
+    return undefined;
+  }
+}
+
 export const createRecipeInputSchema = z
   .object({
     target: z
@@ -58,13 +68,10 @@ export const createRecipeInputSchema = z
               .string()
               .url()
               .max(2_000)
-              .refine((value) => {
-                try {
-                  return ["http:", "https:"].includes(new URL(value).protocol);
-                } catch {
-                  return false;
-                }
-              }, "Source URL must use HTTP or HTTPS."),
+              .refine(
+                (value) => safeSourceHref(value) !== undefined,
+                "Source URL must use HTTP or HTTPS.",
+              ),
           })
           .strict(),
       )
@@ -180,10 +187,8 @@ export function serializeRecipeContent(
   if (recipe.sourceLinks?.length) {
     lines.push("## Sources", "");
     for (const link of recipe.sourceLinks) {
-      const href = new URL(link.url)
-        .toString()
-        .replaceAll("(", "%28")
-        .replaceAll(")", "%29");
+      const href = safeSourceHref(link.url);
+      if (!href) continue;
       lines.push(
         `- [${escapeInlineText(link.title?.trim() || link.url)}](${href})`,
       );
