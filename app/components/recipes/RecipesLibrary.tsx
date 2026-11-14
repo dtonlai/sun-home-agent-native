@@ -27,7 +27,6 @@ import {
   cuisineOptions,
   buildRecipeCollectionTableQuery,
   buildRecipeDocumentSearchQuery,
-  cuisineFromSearchSnippet,
   recipeEntryFromCollectionItem,
   type RecipeListEntry,
 } from "@/components/recipes/recipe-library-filtering";
@@ -497,32 +496,6 @@ export function RecipesLibrary() {
       retry: false,
     },
   );
-  const [requestedCuisinePage, setRequestedCuisinePage] = useState<{
-    spaceId: string;
-    offset: number;
-  } | null>(null);
-  const cuisineMetadataOffset =
-    activeSpace && requestedCuisinePage?.spaceId === activeSpace.id
-      ? requestedCuisinePage.offset
-      : 0;
-  const cuisineMetadataQuery = useActionQuery(
-    "search-documents",
-    activeSpace
-      ? {
-          query: "Cuisine",
-          limit: PAGE_SIZE,
-          offset: cuisineMetadataOffset,
-          spaceId: activeSpace.id,
-          documentType: "page",
-        }
-      : undefined,
-    {
-      enabled: Boolean(activeSpace),
-      queryKeyScope: viewerScope,
-      retry: false,
-    },
-  );
-  const cuisineMetadataKey = activeSpace?.id ?? "";
   const currentCollectionKey = JSON.stringify([
     activeSpace?.id,
     selectedDatabaseId,
@@ -614,10 +587,6 @@ export function RecipesLibrary() {
   ]);
   const [collectionIndexState, setCollectionIndexState] =
     useState<RemotePageState<RecipeCollectionItem> | null>(null);
-  const [cuisineMetadataState, setCuisineMetadataState] =
-    useState<RemotePageState<RecipeListItem & { snippet?: string }> | null>(
-      null,
-    );
   useEffect(() => {
     if (!collectionPage?.pagination) return;
     const nextPagination = {
@@ -685,38 +654,6 @@ export function RecipesLibrary() {
     currentCollectionKey,
     hasActiveFilters,
   ]);
-  useEffect(() => {
-    if (!cuisineMetadataQuery.data || !activeSpace) return;
-    setCuisineMetadataState((previous) => {
-      const pages =
-        previous?.key === cuisineMetadataKey
-          ? new Map(previous.pages)
-          : new Map<number, Array<RecipeListItem & { snippet?: string }>>();
-      const incoming = cuisineMetadataQuery.data.documents;
-      const existing = pages.get(cuisineMetadataOffset);
-      if (
-        previous?.key === cuisineMetadataKey &&
-        existing?.length === incoming.length &&
-        existing.every((item, index) => item === incoming[index]) &&
-        previous.pagination.nextOffset ===
-          cuisineMetadataQuery.data.pagination.nextOffset
-      ) {
-        return previous;
-      }
-      pages.set(cuisineMetadataOffset, incoming);
-      return {
-        key: cuisineMetadataKey,
-        pages,
-        pagination: cuisineMetadataQuery.data.pagination,
-      };
-    });
-  }, [
-    activeSpace,
-    cuisineMetadataKey,
-    cuisineMetadataOffset,
-    cuisineMetadataQuery.data,
-  ]);
-
   const recipeDocuments = useMemo(() => {
     if (!activeSpace || pageState?.spaceId !== activeSpace.id) return [];
     const pages = [...pageState.pages.entries()].sort(([a], [b]) => a - b);
@@ -757,27 +694,9 @@ export function RecipesLibrary() {
     () => collectionIndexItems.map(recipeEntryFromCollectionItem),
     [collectionIndexItems],
   );
-  const cuisineMetadataDocuments = useMemo(() => {
-    if (cuisineMetadataState?.key !== cuisineMetadataKey) return [];
-    return [...cuisineMetadataState.pages.entries()]
-      .sort(([left], [right]) => left - right)
-      .reduce<Array<RecipeListItem & { snippet?: string }>>(
-        (all, [, page]) => appendUnique(all, page),
-        [],
-      );
-  }, [cuisineMetadataKey, cuisineMetadataState]);
   const availableCuisines = useMemo(
-    () =>
-      Array.from(
-        new Set([
-          ...cuisineOptions(collectionIndexEntries),
-          ...cuisineMetadataDocuments.flatMap((document) => {
-            const cuisine = cuisineFromSearchSnippet(document.snippet);
-            return cuisine ? [cuisine] : [];
-          }),
-        ]),
-      ).sort((left, right) => left.localeCompare(right)),
-    [collectionIndexEntries, cuisineMetadataDocuments],
+    () => cuisineOptions(collectionIndexEntries),
+    [collectionIndexEntries],
   );
   const visibleRecipeDocuments = useMemo(
     () =>
@@ -832,13 +751,6 @@ export function RecipesLibrary() {
   const nextCollectionOffset = collectionHasMore
     ? (collectionPageState?.pagination.nextOffset ?? null)
     : null;
-  const cuisineMetadataHasMore =
-    cuisineMetadataState?.key === cuisineMetadataKey &&
-    cuisineMetadataState.pagination.hasMore;
-  const nextCuisineMetadataOffset = cuisineMetadataHasMore
-    ? (cuisineMetadataState?.pagination.nextOffset ?? null)
-    : null;
-
   const updateLocation = (
     recipeId: string | null,
     spaceId = activeSpace?.id,
@@ -1014,21 +926,22 @@ export function RecipesLibrary() {
               <Label htmlFor="recipe-cuisine-filter">
                 {t("recipes.filterCuisine")}
               </Label>
-              <select
+              <Input
                 id="recipe-cuisine-filter"
-                className="h-9 rounded-md border border-input bg-background px-3 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                list="recipe-cuisine-suggestions"
                 value={cuisineFilter}
+                placeholder={t("recipes.allCuisines")}
                 onChange={(event) =>
                   setCuisineFilter(event.currentTarget.value)
                 }
-              >
-                <option value="">{t("recipes.allCuisines")}</option>
+              />
+              <datalist id="recipe-cuisine-suggestions">
                 {availableCuisines.map((cuisine) => (
                   <option key={cuisine} value={cuisine}>
                     {cuisine}
                   </option>
                 ))}
-              </select>
+              </datalist>
             </div>
             <p className="text-xs text-muted-foreground">
               {t("recipes.filterCoverage")}
@@ -1051,16 +964,6 @@ export function RecipesLibrary() {
                 }
                 onRetry={() => void recipeDatabaseQuery.refetch()}
                 retrying={recipeDatabaseQuery.isFetching}
-              />
-            ) : null}
-            {cuisineMetadataQuery.isError ? (
-              <PageError
-                description={
-                  actionErrorMessage(cuisineMetadataQuery.error) ??
-                  t("recipes.cuisineOptionsError")
-                }
-                onRetry={() => void cuisineMetadataQuery.refetch()}
-                retrying={cuisineMetadataQuery.isFetching}
               />
             ) : null}
           </div>
@@ -1172,9 +1075,7 @@ export function RecipesLibrary() {
                   </Button>
                 </div>
               ) : !hasActiveFilters &&
-                (nextOffset !== null ||
-                  nextCollectionOffset !== null ||
-                  nextCuisineMetadataOffset !== null) ? (
+                (nextOffset !== null || nextCollectionOffset !== null) ? (
                 <div className="border-t border-border p-3">
                   <Button
                     type="button"
@@ -1183,8 +1084,7 @@ export function RecipesLibrary() {
                     size="sm"
                     disabled={
                       documentsQuery.isFetching ||
-                      collectionItemsQuery.isFetching ||
-                      cuisineMetadataQuery.isFetching
+                      collectionItemsQuery.isFetching
                     }
                     onClick={() => {
                       if (nextOffset !== null) {
@@ -1199,17 +1099,10 @@ export function RecipesLibrary() {
                           offset: nextCollectionOffset,
                         });
                       }
-                      if (nextCuisineMetadataOffset !== null) {
-                        setRequestedCuisinePage({
-                          spaceId: activeSpace.id,
-                          offset: nextCuisineMetadataOffset,
-                        });
-                      }
                     }}
                   >
                     {documentsQuery.isFetching ||
-                    collectionItemsQuery.isFetching ||
-                    cuisineMetadataQuery.isFetching
+                    collectionItemsQuery.isFetching
                       ? t("recipes.loadingMore")
                       : t("recipes.loadMore")}
                   </Button>

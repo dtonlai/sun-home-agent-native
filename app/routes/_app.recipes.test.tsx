@@ -71,17 +71,6 @@ const fixture = vi.hoisted(() => ({
     error: null as unknown,
     refetch: vi.fn(),
   },
-  cuisineMetadataSearch: {
-    data: {
-      documents: [] as Array<Record<string, unknown>>,
-      pagination: { hasMore: false, nextOffset: null as number | null },
-    },
-    isLoading: false,
-    isError: false,
-    isFetching: false,
-    error: null as unknown,
-    refetch: vi.fn(),
-  },
   search: "",
   listCalls: [] as Array<{ args: Record<string, unknown>; enabled: boolean }>,
   searchCalls: [] as Array<{ args: Record<string, unknown>; enabled: boolean }>,
@@ -197,9 +186,7 @@ vi.mock("@agent-native/core/client/hooks", () => ({
         args: args ?? {},
         enabled: options.enabled !== false,
       });
-      return args?.query === "Cuisine"
-        ? fixture.cuisineMetadataSearch
-        : fixture.searchDocuments;
+      return fixture.searchDocuments;
     }
     if (name === "list-documents") {
       fixture.listCalls.push({
@@ -369,10 +356,6 @@ describe("Recipes library", () => {
     fixture.recipeItems.isFetching = false;
     fixture.recipeItems.error = null;
     fixture.searchDocuments.data = {
-      documents: [],
-      pagination: { hasMore: false, nextOffset: null },
-    };
-    fixture.cuisineMetadataSearch.data = {
       documents: [],
       pagination: { hasMore: false, nextOffset: null },
     };
@@ -617,21 +600,6 @@ describe("Recipes library", () => {
       ],
       pagination: { hasMore: true, nextOffset: 100 },
     };
-    fixture.cuisineMetadataSearch.data = {
-      documents: [
-        {
-          id: "legacy-italian",
-          title: "Family Bowl",
-          snippet: "...Cuisine: Italian Tags: vegetarian...",
-        },
-        {
-          id: "legacy-british",
-          title: "Family Roast",
-          snippet: "...Cuisine: British Tags: family...",
-        },
-      ],
-      pagination: { hasMore: false, nextOffset: null },
-    };
     render(root);
 
     const search = container.querySelector<HTMLInputElement>(
@@ -639,12 +607,10 @@ describe("Recipes library", () => {
     )!;
     setValue(search, "vegetarian");
     expect(
-      [
-        ...container.querySelectorAll<HTMLOptionElement>(
-          "#recipe-cuisine-filter option",
-        ),
-      ].map((option) => option.value),
-    ).toContain("British");
+      container.querySelector<HTMLDataListElement>(
+        "#recipe-cuisine-suggestions",
+      )?.textContent,
+    ).not.toContain("British");
     expect(
       container.querySelector('[href*="recipeId=unloaded-legacy"]'),
     ).not.toBeNull();
@@ -667,7 +633,7 @@ describe("Recipes library", () => {
       }),
     );
 
-    const cuisine = container.querySelector<HTMLSelectElement>(
+    const cuisine = container.querySelector<HTMLInputElement>(
       "#recipe-cuisine-filter",
     )!;
     setValue(cuisine, "Italian");
@@ -681,9 +647,11 @@ describe("Recipes library", () => {
     expect(collectionQuery.filters).toContainEqual(
       expect.objectContaining({ key: "cuisine-id", value: "Italian" }),
     );
-    expect([...cuisine.options].map((option) => option.value)).toContain(
-      "Italian",
-    );
+    expect(
+      container
+        .querySelector<HTMLDataListElement>("#recipe-cuisine-suggestions")
+        ?.querySelector('option[value="Italian"]'),
+    ).not.toBeNull();
     setValue(search, "");
     setValue(cuisine, "");
     const tag =
@@ -706,10 +674,7 @@ describe("Recipes library", () => {
     expect(
       fixture.collectionCalls.some(({ args }) => args.offset === 100),
     ).toBe(true);
-    expect(
-      last(fixture.searchCalls.filter(({ args }) => args.query !== "Cuisine"))
-        ?.args.offset,
-    ).toBe(100);
+    expect(last(fixture.searchCalls)?.args.offset).toBe(100);
   });
 
   it("creates a recipe through the shared action and exposes its saved link", async () => {

@@ -8,6 +8,8 @@ export type RecipeListEntry = {
   title: string | null;
   /** A short, display-only action preview; never used to infer metadata. */
   contentPreview?: string | null;
+  /** A bounded search snippet; never used to infer metadata. */
+  snippet?: string | null;
   /** Full body content is supplied only by an authorized full-document read. */
   fullContent?: string | null;
   cuisines?: string[];
@@ -93,18 +95,6 @@ export function recipeEntryFromCollectionItem(item: {
     cuisines: propertyTextValues(cuisineProperty?.value),
     tags: propertyTextValues(tagsProperty?.value),
   };
-}
-
-/** Pulls a metadata label from a search action's query-centered body snippet. */
-export function cuisineFromSearchSnippet(snippet: string | null | undefined) {
-  if (!snippet) return null;
-  const compact = snippet.replace(/\.{3}/g, " ").replace(/\s+/g, " ").trim();
-  const match =
-    /(?:^|\s)cuisine\s*:\s*(.+?)(?=\s+(?:tags?|servings?|ingredients?|instructions?|method|source|yield|prep|cook|notes?)\s*:|\s+#{1,6}\s|$)/i.exec(
-      compact,
-    );
-  const cuisine = match?.[1]?.trim().replace(/[;,.]+$/, "");
-  return cuisine || null;
 }
 
 export function cuisineOptions(entries: RecipeListEntry[]) {
