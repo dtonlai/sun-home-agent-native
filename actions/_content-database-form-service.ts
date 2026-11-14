@@ -16,6 +16,7 @@ import { documentAttributionActor } from "../server/lib/document-attribution.js"
 import type {
   ContentDatabaseView,
   DocumentPropertySystemRole,
+  SubmitContentDatabaseFormRequest,
   SubmitContentDatabaseFormResponse,
 } from "../shared/api.js";
 import { contentDatabaseFormQuestions } from "../shared/database-form.js";

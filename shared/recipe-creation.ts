@@ -26,7 +26,7 @@ function safeSourceHref(value: string): string | undefined {
   try {
     const url = new URL(value);
     if (url.protocol !== "http:" && url.protocol !== "https:") return undefined;
-    return url.toString().replaceAll("(", "%28").replaceAll(")", "%29");
+    return url.toString().replace(/\(/g, "%28").replace(/\)/g, "%29");
   } catch {
     return undefined;
   }

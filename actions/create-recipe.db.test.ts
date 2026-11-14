@@ -3,6 +3,7 @@ import { rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import { withMigrationRuntime } from "@agent-native/core/db";
 import { runWithRequestContext } from "@agent-native/core/server";
 import { eq, sql } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
@@ -34,8 +35,11 @@ beforeAll(async () => {
   schema = dbModule.schema;
   createRecipe = (await import("./create-recipe.js")).default;
   searchDocuments = (await import("./search-documents.js")).default;
-  const plugin = (await import("../server/plugins/db.js")).default;
-  await plugin(undefined as any);
+  const database = await import("../server/plugins/db.js");
+  await withMigrationRuntime(async () => {
+    await database.runContentMigrations(null);
+    await database.runContentSourceMigrations(null);
+  });
 }, 60_000);
 
 async function seedRecipesCollection() {
