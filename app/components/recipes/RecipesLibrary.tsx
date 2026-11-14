@@ -7,7 +7,7 @@ import {
 } from "@agent-native/core/client/hooks";
 import { useT } from "@agent-native/core/client/i18n";
 import { useSetPageTitle } from "@agent-native/toolkit/app-shell";
-import type { Document } from "@shared/api";
+import type { ContentDatabaseResponsePayload, Document } from "@shared/api";
 import { useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router";
 
@@ -281,7 +281,18 @@ function RecipeDetails({
 export function RecipesLibrary({
   createRecipe,
 }: {
-  createRecipe?: (recipe: RecipeDraftInput) => Promise<CreatedRecipe>;
+  createRecipe?: (
+    recipe: RecipeDraftInput,
+    destination: {
+      target: {
+        spaceId: string;
+        databaseId: string;
+        databaseDocumentId: string;
+      };
+      formViewId: string;
+      expectedSchemaRevision: string;
+    },
+  ) => Promise<CreatedRecipe>;
 } = {}) {
   const t = useT();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -290,6 +301,9 @@ export function RecipesLibrary({
   const [recipeSearch, setRecipeSearch] = useState("");
   const [cuisineFilter, setCuisineFilter] = useState("");
   const [isCreatingRecipe, setIsCreatingRecipe] = useState(false);
+  const [selectedRecipeDatabaseId, setSelectedRecipeDatabaseId] = useState<
+    string | null
+  >(null);
   const { session } = useSession();
   const viewerScope = [session?.email ?? null, session?.orgId ?? null] as const;
   useSetPageTitle(t("recipes.title"));
@@ -338,6 +352,54 @@ export function RecipesLibrary({
       retry: false,
     },
   );
+  const recipeDatabasesQuery = useActionQuery(
+    "list-content-databases",
+    activeSpace ? { spaceId: activeSpace.id, limit: 50, offset: 0 } : undefined,
+    {
+      enabled: Boolean(activeSpace && isCreatingRecipe && createRecipe),
+      queryKeyScope: viewerScope,
+      retry: false,
+    },
+  );
+  const recipeDatabases = recipeDatabasesQuery.data?.databases ?? [];
+  const selectedDatabaseId =
+    selectedRecipeDatabaseId &&
+    recipeDatabases.some(
+      (database: { databaseId: string }) =>
+        database.databaseId === selectedRecipeDatabaseId,
+    )
+      ? selectedRecipeDatabaseId
+      : recipeDatabases.length === 1
+        ? recipeDatabases[0]?.databaseId
+        : null;
+  const recipeDatabaseQuery = useActionQuery(
+    "get-content-database",
+    selectedDatabaseId
+      ? { databaseId: selectedDatabaseId, limit: 0 }
+      : undefined,
+    {
+      enabled: Boolean(
+        activeSpace && isCreatingRecipe && createRecipe && selectedDatabaseId,
+      ),
+      queryKeyScope: viewerScope,
+      retry: false,
+    },
+  );
+  const recipeDatabaseResponse = recipeDatabaseQuery.data;
+  const recipeDatabase =
+    recipeDatabaseResponse && "database" in recipeDatabaseResponse
+      ? (recipeDatabaseResponse as ContentDatabaseResponsePayload)
+      : undefined;
+  const recipeDatabaseSpaceId = recipeDatabase?.database?.spaceId;
+  const mutationContract = recipeDatabase?.mutationContract;
+  const formViews = (recipeDatabase?.database?.viewConfig?.views ?? []).filter(
+    (view: { type: string }) => view.type === "form",
+  );
+  const selectedFormView =
+    formViews.find(
+      (view: { id: string }) =>
+        view.id === recipeDatabase?.database?.viewConfig?.activeViewId,
+    ) ?? formViews[0];
 
   const [pageState, setPageState] = useState<RecipePageState | null>(null);
   useEffect(() => {
@@ -642,10 +704,143 @@ export function RecipesLibrary({
           className="min-w-0 rounded-lg border border-border bg-card p-4 sm:p-6"
         >
           {isCreatingRecipe && createRecipe ? (
-            <RecipeCreationForm
-              onCancel={() => setIsCreatingRecipe(false)}
-              onCreate={createRecipe}
-            />
+            recipeDatabasesQuery.isError ? (
+              <PageError
+                description={
+                  actionErrorMessage(recipeDatabasesQuery.error) ??
+                  t("recipes.createCollectionError")
+                }
+                onRetry={() => void recipeDatabasesQuery.refetch()}
+                retrying={recipeDatabasesQuery.isFetching}
+              />
+            ) : recipeDatabasesQuery.isLoading || !recipeDatabasesQuery.data ? (
+              <div aria-busy="true" className="space-y-4">
+                <Skeleton className="h-8 w-64" />
+                <Skeleton className="h-48 w-full" />
+              </div>
+            ) : recipeDatabases.length === 0 ? (
+              <div className="grid justify-items-start gap-3">
+                <p className="text-sm text-muted-foreground">
+                  {t("recipes.createCollectionMissing")}
+                </p>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setIsCreatingRecipe(false)}
+                >
+                  {t("recipes.cancel")}
+                </Button>
+              </div>
+            ) : recipeDatabases.length > 1 && !selectedDatabaseId ? (
+              <div className="grid max-w-md gap-3">
+                <div className="grid gap-1.5">
+                  <Label htmlFor="recipe-database-choice">
+                    {t("recipes.chooseRecipeCollection")}
+                  </Label>
+                  <select
+                    id="recipe-database-choice"
+                    className="h-9 rounded-md border border-input bg-background px-3 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    value=""
+                    onChange={(event) =>
+                      setSelectedRecipeDatabaseId(event.currentTarget.value)
+                    }
+                  >
+                    <option value="">{t("recipes.chooseCollection")}</option>
+                    {recipeDatabases.map(
+                      (database: { databaseId: string; title: string }) => (
+                        <option
+                          key={database.databaseId}
+                          value={database.databaseId}
+                        >
+                          {database.title}
+                        </option>
+                      ),
+                    )}
+                  </select>
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="w-fit"
+                  onClick={() => setIsCreatingRecipe(false)}
+                >
+                  {t("recipes.cancel")}
+                </Button>
+              </div>
+            ) : recipeDatabaseResponse && !recipeDatabase ? (
+              <p role="alert" className="text-sm text-destructive">
+                {t("recipes.createCollectionUnavailable")}
+              </p>
+            ) : recipeDatabaseQuery.isError ? (
+              <PageError
+                description={
+                  actionErrorMessage(recipeDatabaseQuery.error) ??
+                  t("recipes.createCollectionError")
+                }
+                onRetry={() => void recipeDatabaseQuery.refetch()}
+                retrying={recipeDatabaseQuery.isFetching}
+              />
+            ) : recipeDatabaseQuery.isLoading || !recipeDatabase ? (
+              <div aria-busy="true" className="space-y-4">
+                <Skeleton className="h-8 w-64" />
+                <Skeleton className="h-48 w-full" />
+              </div>
+            ) : recipeDatabaseSpaceId !== activeSpace.id ||
+              mutationContract?.target?.spaceId !== activeSpace.id ? (
+              <p role="alert" className="text-sm text-destructive">
+                {t("recipes.createCollectionUnavailable")}
+              </p>
+            ) : !selectedFormView ||
+              !mutationContract?.schemaRevision ||
+              !mutationContract?.target ? (
+              <p role="alert" className="text-sm text-destructive">
+                {t("recipes.createFormUnavailable")}
+              </p>
+            ) : (
+              <>
+                {recipeDatabases.length > 1 ? (
+                  <div className="mb-4 grid max-w-md gap-1.5">
+                    <Label htmlFor="recipe-database-choice">
+                      {t("recipes.chooseRecipeCollection")}
+                    </Label>
+                    <select
+                      id="recipe-database-choice"
+                      className="h-9 rounded-md border border-input bg-background px-3 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      value={selectedDatabaseId ?? ""}
+                      onChange={(event) =>
+                        setSelectedRecipeDatabaseId(event.currentTarget.value)
+                      }
+                    >
+                      {recipeDatabases.map(
+                        (database: { databaseId: string; title: string }) => (
+                          <option
+                            key={database.databaseId}
+                            value={database.databaseId}
+                          >
+                            {database.title}
+                          </option>
+                        ),
+                      )}
+                    </select>
+                  </div>
+                ) : null}
+                <RecipeCreationForm
+                  onCancel={() => setIsCreatingRecipe(false)}
+                  onCreate={(recipe) =>
+                    createRecipe(recipe, {
+                      target: {
+                        spaceId: mutationContract.target.spaceId,
+                        databaseId: mutationContract.target.databaseId,
+                        databaseDocumentId:
+                          mutationContract.target.databaseDocumentId,
+                      },
+                      formViewId: selectedFormView.id,
+                      expectedSchemaRevision: mutationContract.schemaRevision,
+                    })
+                  }
+                />
+              </>
+            )
           ) : selectedRecipeId ? (
             documentQuery.isLoading ? (
               <div aria-busy="true" className="space-y-4">
