@@ -1,6 +1,6 @@
 # Content backed recipe creation contract
 
-**Status:** Contract reconciled with the approved B1-T11 recipe creation task. No live Content changes are included.
+**Status:** Contract reconciled with the approved B1-T11 tag decision. No live Content changes are included.
 
 **Evidence version:** `@agent-native/core` 0.226.0, pinned by `package.json` and `pnpm-lock.yaml`. Evidence below was read from the installed package docs/source and this repository's registered Content actions. No database was opened or modified.
 
@@ -87,9 +87,9 @@ The page body is canonical for the recipe's complete content. Properties are ind
 Search behavior for the approved Text property representation:
 
 - **Recipe body and tags written in the body:** `server/db/index.ts` registers Content's document search resource and projects each document's `title`, `description`, and `content` into the Core index as title, summary, and body. `actions/search-documents.ts` uses that index when ready and has a SQL fallback against those same document columns. Its action description states that title/description match anywhere and body terms match from word starts. Thus body text, including an early visible `Tags: ...` line, is searchable by `search-documents` for ordinary pages and collection row pages, subject to access and `hideFromSearch`. This is not an unlimited-body guarantee: Core 0.226.0 `buildSearchVector()` applies Postgres position and vector-size budgets and may collapse positions or omit excess distinct words. Keeping tags near the start of the body and in the collection property avoids relying on a late-body tag for structured search.
-- **Tag values in the Tags Text property:** they are not part of `documentSearchIndex` and are not searched by `search-documents`. Collection `tableQuery.search` searches row title and property values: `shared/database-query.ts` `itemSearchText()` concatenates each property value, and `applyContentDatabaseTableQuery()` applies a case-insensitive substring match. The stored JSON array is lossless and can be filtered exactly by its full serialized value where property filters support equality, but free-text table search is substring matching over JSON syntax; it does not provide tokenized per-tag semantics or exact array-element matching. It does not include the recipe body. The body `Tags:` line supports global document search, subject to the search-vector size/position limits above. Search limitations include Markdown escaping in the body line, JSON quoting/escaping in the property value, and the difference between substring matching and tag-aware filtering.
+- **Tag values in the Tags Text property:** they are not part of `documentSearchIndex` and are not searched by `search-documents`. Collection `tableQuery.search` searches row title and property values: `shared/database-query.ts` `itemSearchText()` concatenates each property value, and `applyContentDatabaseTableQuery()` applies a case-insensitive substring match. It does not include the recipe body. The JSON array property preserves arbitrary strings losslessly, but free-text search is over JSON syntax and does not provide tokenized tag semantics or exact array-element matching. The body `Tags:` line supports global document search subject to the search-vector limits above; Markdown escaping applies to body text and JSON quoting/escaping applies to the property value.
 - **Legacy recipes:** body tags/cuisine are found by `search-documents`; existing plain pages have no collection property values, so they cannot satisfy structured `Tags` filters without parsing or backfill. No backfill is proposed. Search must make this distinction visible rather than silently dropping legacy recipes.
-- **Tag schema:** creation requires exactly one existing `Tags` property with type Text; missing, duplicate, or differently typed properties fail closed. The action never provisions or mutates collection schema. Tags are encoded with standard JavaScript `JSON.stringify` array escaping in that property, preserving arbitrary strings losslessly. The body line joins escaped tags with comma-space for readability and search; commas are therefore ambiguous as delimiters in the body, while the property JSON remains authoritative.
+- **Tag schema and encoding:** creation requires exactly one existing `Tags` property of type Text; missing, duplicate, or differently typed properties fail closed. The action never provisions or mutates collection schema. Property values use standard JavaScript `JSON.stringify` array encoding. The body line joins individually Markdown-escaped labels with comma-space for readability/search, so commas are ambiguous as body delimiters; the JSON property is authoritative.
 
 ## Action composition and partial-failure alternatives
 
@@ -140,7 +140,7 @@ The two-action route is a supported recovery fallback for callers able to use th
 
 ## Product choices still open
 
-1. **Tags representation (approved for B1-T11):** freely entered values are stored losslessly as a JSON array string in the existing Text `Tags` property and visibly as an escaped, searchable body line. No option vocabulary is provisioned.
+1. **Tags (approved for B1-T11):** accept freely entered labels in the existing Text `Tags` property as a JSON array string, with an early escaped body line for document search; do not provision option vocabulary.
 2. **Cuisine:** Use a free-text property by default; confirm whether the owner wants a controlled cuisine list.
 3. **Collection selection/setup:** Confirm the intended existing collection if more than one authorized collection is present, and who performs one-time collection/property setup. No automatic provisioning or migration is proposed.
 
