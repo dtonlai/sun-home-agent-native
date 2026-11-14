@@ -4,7 +4,6 @@ import {
   buildRecipeCollectionTableQuery,
   buildRecipeDocumentSearchQuery,
   cuisineOptions,
-  cuisineFromSearchSnippet,
   filterRecipeEntries,
   parseRecipeIndexMetadata,
   recipeEntryFromCollectionItem,
@@ -28,13 +27,20 @@ describe("recipe library filtering", () => {
     ).toEqual([]);
   });
 
-  it("extracts cuisine choices from full-document search snippets rather than list previews", () => {
-    expect(
-      cuisineFromSearchSnippet("...Cuisine: British Tags: family, sunday..."),
-    ).toBe("British");
-    expect(
-      cuisineFromSearchSnippet("...Cuisine: Japanese Ingredients: rice..."),
-    ).toBe("Japanese");
+  it("does not infer cuisine from ambiguous or truncated bounded search snippets", () => {
+    const snippetOnlyRecipes = [
+      {
+        id: "prose-hit",
+        title: "Japanese-inspired Bowl",
+        snippet: "...The cuisine: Japanese is discussed in this note...",
+      },
+      {
+        id: "truncated-field",
+        title: "Family Roast",
+        snippet: "...Cuisine: British Tags: family, sund...",
+      },
+    ];
+    expect(cuisineOptions(snippetOnlyRecipes)).toEqual([]);
   });
 
   it("reads structured metadata from live collection row properties and legacy metadata from full bodies", () => {
@@ -57,9 +63,15 @@ describe("recipe library filtering", () => {
       title: "Family Roast",
       contentPreview: "Ingredients roast potatoes...",
       fullContent:
-        "Cuisine: British\nTags: sunday, family\nIngredients: potatoes",
+        "# Sunday Roast\n\nA family recipe passed along.\n\nCuisine: British\nTags: sunday, family\n\n## Ingredients\n- 2 potatoes\n\n## Method\nRoast until golden.",
     };
-    const entries = [soup, bread, legacy];
+    const created = {
+      id: "created-page",
+      title: "Roasted Vegetables",
+      fullContent:
+        "Servings: 2\nTags: rustic\nCuisine: Italian\n## Ingredients\n\n**Vegetables**\n- 2 carrots\n\n## Instructions\n\n1. Roast until tender.",
+    };
+    const entries = [soup, bread, legacy, created];
 
     expect(cuisineOptions(entries)).toEqual(["British", "French", "Italian"]);
     expect(

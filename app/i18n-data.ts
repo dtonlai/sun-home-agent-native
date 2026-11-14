@@ -1414,7 +1414,7 @@ const enUS = {
     filterCuisine: "Cuisine",
     allCuisines: "All cuisines",
     filterCoverage:
-      "Search checks full recipe bodies and collection properties. Load more to continue through matching pages.",
+      "Cuisine suggestions are from loaded collection rows. Enter a value to search legacy recipe body text; results follow action pagination.",
     filterMetadataUnavailable:
       "This collection has no matching metadata property. Search still checks full recipe bodies and legacy pages.",
     filterChooseCollection:
@@ -1424,7 +1424,6 @@ const enUS = {
     collectionReadError: "Could not read recipe collection properties.",
     filterCollectionsError:
       "Could not load recipe collections for property filters.",
-    cuisineOptionsError: "Could not load cuisine filter choices.",
     noMatchingRecipes: "No recipes match these filters.",
     clearFilters: "Clear filters",
     chooseSpaceTitle: "Choose a Recipes space",
