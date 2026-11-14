@@ -40,6 +40,7 @@ declare global {
     "create-document": ActionEntry<typeof import("../actions/create-document")>;
     "create-github-collection": ActionEntry<typeof import("../actions/create-github-collection")>;
     "create-inline-content-database": ActionEntry<typeof import("../actions/create-inline-content-database")>;
+    "create-recipe": ActionEntry<typeof import("../actions/create-recipe")>;
     "create-video-upload": ActionEntry<typeof import("../actions/create-video-upload")>;
     "delete-comment": ActionEntry<typeof import("../actions/delete-comment")>;
     "delete-content-database": ActionEntry<typeof import("../actions/delete-content-database")>;

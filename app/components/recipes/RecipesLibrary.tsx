@@ -20,8 +20,6 @@ import { parseRecipeContent } from "@/components/recipes/recipe-content";
 import {
   adaptRecipeCreateInput,
   adaptRecipeCreateResult,
-  type RecipeCreateActionInput,
-  type RecipeCreateActionResult,
 } from "@/components/recipes/recipe-create-adapter";
 import {
   cuisineOptions,
@@ -322,14 +320,7 @@ export function RecipesLibrary() {
   >(null);
   const { session } = useSession();
   const viewerScope = [session?.email ?? null, session?.orgId ?? null] as const;
-  // The shared create-recipe action is introduced by the dependent B1-T11 PR.
-  // This explicit adapter contract keeps the UI aligned while this change is
-  // reviewed against main, where the generated action registry does not yet
-  // contain that action name.
-  const createRecipeMutation = useActionMutation<
-    RecipeCreateActionResult,
-    RecipeCreateActionInput
-  >("create-recipe" as never);
+  const createRecipeMutation = useActionMutation("create-recipe");
   useSetPageTitle(t("recipes.title"));
 
   // This is a read of the caller's authorized spaces. Recipes never provisions

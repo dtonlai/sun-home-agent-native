@@ -29,6 +29,7 @@ import * as a_create_content_webhook from "../actions/create-content-webhook";
 import * as a_create_document from "../actions/create-document";
 import * as a_create_github_collection from "../actions/create-github-collection";
 import * as a_create_inline_content_database from "../actions/create-inline-content-database";
+import * as a_create_recipe from "../actions/create-recipe";
 import * as a_create_video_upload from "../actions/create-video-upload";
 import * as a_delete_comment from "../actions/delete-comment";
 import * as a_delete_content_database from "../actions/delete-content-database";
@@ -329,6 +330,7 @@ const modules: Record<string, unknown> = {
   "create-document": a_create_document,
   "create-github-collection": a_create_github_collection,
   "create-inline-content-database": a_create_inline_content_database,
+  "create-recipe": a_create_recipe,
   "create-video-upload": a_create_video_upload,
   "delete-comment": a_delete_comment,
   "delete-content-database": a_delete_content_database,
