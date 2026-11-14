@@ -22,6 +22,27 @@ const fixture = vi.hoisted(() => ({
     error: null as unknown,
     refetch: vi.fn(),
   },
+  recipeDatabases: {
+    data: {
+      databases: [] as Array<Record<string, unknown>>,
+      pagination: undefined as
+        | { hasMore: boolean; nextOffset: number | null }
+        | undefined,
+    },
+    isLoading: false,
+    isError: false,
+    isFetching: false,
+    error: null as unknown,
+    refetch: vi.fn(),
+  },
+  recipeDatabase: {
+    data: undefined as unknown,
+    isLoading: false,
+    isError: false,
+    isFetching: false,
+    error: null as unknown,
+    refetch: vi.fn(),
+  },
   search: "",
   listCalls: [] as Array<{ args: Record<string, unknown>; enabled: boolean }>,
   documentCalls: [] as Array<Record<string, unknown>>,
@@ -54,6 +75,8 @@ vi.mock("@agent-native/core/client/hooks", () => ({
       fixture.documentCalls.push(args ?? {});
       return fixture.document;
     }
+    if (name === "list-content-databases") return fixture.recipeDatabases;
+    if (name === "get-content-database") return fixture.recipeDatabase;
     if (name === "list-documents") {
       fixture.listCalls.push({
         args: args ?? {},
@@ -193,6 +216,16 @@ describe("Recipes library", () => {
     fixture.document.isError = false;
     fixture.document.isFetching = false;
     fixture.document.error = null;
+    fixture.recipeDatabases.data = { databases: [], pagination: undefined };
+    fixture.recipeDatabases.isLoading = false;
+    fixture.recipeDatabases.isError = false;
+    fixture.recipeDatabases.isFetching = false;
+    fixture.recipeDatabases.error = null;
+    fixture.recipeDatabase.data = undefined;
+    fixture.recipeDatabase.isLoading = false;
+    fixture.recipeDatabase.isError = false;
+    fixture.recipeDatabase.isFetching = false;
+    fixture.recipeDatabase.error = null;
     fixture.search = "";
     fixture.listCalls = [];
     fixture.documentCalls = [];
@@ -350,6 +383,35 @@ describe("Recipes library", () => {
       error: null,
       refetch: vi.fn(),
     });
+    fixture.recipeDatabases.data = {
+      databases: [
+        {
+          databaseId: "recipes-database",
+          documentId: "recipes-database-document",
+          spaceId: "caller-space-id",
+          title: "Recipe collection",
+          description: "",
+        },
+      ],
+      pagination: { hasMore: false, nextOffset: null },
+    };
+    fixture.recipeDatabase.data = {
+      database: {
+        spaceId: "caller-space-id",
+        viewConfig: {
+          activeViewId: "recipe-form",
+          views: [{ id: "recipe-form", type: "form" }],
+        },
+      },
+      mutationContract: {
+        target: {
+          spaceId: "caller-space-id",
+          databaseId: "recipes-database",
+          databaseDocumentId: "recipes-database-document",
+        },
+        schemaRevision: "schema-1",
+      },
+    };
     act(() =>
       root.render(
         <RecipesLibrary
