@@ -254,4 +254,150 @@ describe("RecipeCreationForm", () => {
     expect(onCreate.mock.calls[1]?.[0].idempotencyKey).toBe(firstKey);
     expect(container.textContent).toContain("recipes.createSuccess");
   });
+
+  it("includes a tag still in the input when Save is pressed", async () => {
+    const onCreate = vi.fn(async (_recipe: RecipeDraftInput) => ({
+      documentId: "saved-recipe",
+      urlPath: "/page/saved-recipe",
+    }));
+    act(() =>
+      root.render(
+        <RecipeCreationForm onCancel={vi.fn()} onCreate={onCreate} />,
+      ),
+    );
+    const title = container.querySelector<HTMLInputElement>(
+      "input[maxlength='500']",
+    )!;
+    changeValue(title, "Tomato Soup");
+    changeValue(container.querySelectorAll("textarea")[0]!, "4 tomatoes");
+    changeValue(container.querySelectorAll("textarea")[1]!, "Simmer.");
+    const tag =
+      container.querySelector<HTMLInputElement>("input[id$='-tags']")!;
+    changeValue(tag, "weeknight");
+
+    await act(async () => {
+      container
+        .querySelector("form")!
+        .dispatchEvent(
+          new Event("submit", { bubbles: true, cancelable: true }),
+        );
+    });
+
+    expect(onCreate.mock.calls[0]?.[0].tags).toEqual(["weeknight"]);
+  });
+
+  it("keeps a named empty group and shows actionable validation", async () => {
+    const onCreate = vi.fn(async (_recipe: RecipeDraftInput) => ({
+      documentId: "saved-recipe",
+      urlPath: "/page/saved-recipe",
+    }));
+    act(() =>
+      root.render(
+        <RecipeCreationForm onCancel={vi.fn()} onCreate={onCreate} />,
+      ),
+    );
+    changeValue(
+      container.querySelector<HTMLInputElement>("input[maxlength='500']")!,
+      "Tomato Soup",
+    );
+    changeValue(container.querySelectorAll("textarea")[0]!, "4 tomatoes");
+    changeValue(container.querySelectorAll("textarea")[1]!, "Simmer.");
+    click(
+      [...container.querySelectorAll("button")].find((button) =>
+        button.textContent?.includes("recipes.addGroup"),
+      ) ?? null,
+    );
+    const groups = container.querySelectorAll("fieldset");
+    const namedEmpty = groups[0]!.querySelectorAll("input")[1]!;
+    changeValue(namedEmpty, "Topping");
+
+    await act(async () => {
+      container
+        .querySelector("form")!
+        .dispatchEvent(
+          new Event("submit", { bubbles: true, cancelable: true }),
+        );
+    });
+
+    expect(onCreate).not.toHaveBeenCalled();
+    expect(container.querySelector('[role="alert"]')?.textContent).toBe(
+      "recipes.namedGroupNeedsEntries",
+    );
+    expect(namedEmpty.value).toBe("Topping");
+  });
+
+  it("does not silently drop an incomplete note or a source title without a URL", async () => {
+    const onCreate = vi.fn(async (_recipe: RecipeDraftInput) => ({
+      documentId: "saved-recipe",
+      urlPath: "/page/saved-recipe",
+    }));
+    act(() =>
+      root.render(
+        <RecipeCreationForm onCancel={vi.fn()} onCreate={onCreate} />,
+      ),
+    );
+    changeValue(
+      container.querySelector<HTMLInputElement>("input[maxlength='500']")!,
+      "Tomato Soup",
+    );
+    changeValue(container.querySelectorAll("textarea")[0]!, "4 tomatoes");
+    changeValue(container.querySelectorAll("textarea")[1]!, "Simmer.");
+    click(
+      [...container.querySelectorAll("button")].find(
+        (button) => button.textContent === "recipes.addNote",
+      ) ?? null,
+    );
+    changeValue(
+      [...container.querySelectorAll("input")].find((input) =>
+        input.id.includes("-note-0-title"),
+      )!,
+      "Make ahead",
+    );
+
+    const submit = async () =>
+      act(async () => {
+        container
+          .querySelector("form")!
+          .dispatchEvent(
+            new Event("submit", { bubbles: true, cancelable: true }),
+          );
+      });
+    await submit();
+    expect(onCreate).not.toHaveBeenCalled();
+    expect(container.querySelector('[role="alert"]')?.textContent).toBe(
+      "recipes.noteNeedsTitleAndDetails",
+    );
+    expect(
+      [...container.querySelectorAll("input")].find((input) =>
+        input.id.includes("-note-0-title"),
+      )?.value,
+    ).toBe("Make ahead");
+
+    click(
+      [...container.querySelectorAll("button")].find(
+        (button) => button.textContent === "recipes.remove",
+      ) ?? null,
+    );
+    click(
+      [...container.querySelectorAll("button")].find(
+        (button) => button.textContent === "recipes.addSource",
+      ) ?? null,
+    );
+    changeValue(
+      [...container.querySelectorAll("input")].find((input) =>
+        input.id.includes("-source-0-title"),
+      )!,
+      "Cookbook",
+    );
+    await submit();
+    expect(onCreate).not.toHaveBeenCalled();
+    expect(container.querySelector('[role="alert"]')?.textContent).toBe(
+      "recipes.sourceNeedsUrl",
+    );
+    expect(
+      [...container.querySelectorAll("input")].find((input) =>
+        input.id.includes("-source-0-title"),
+      )?.value,
+    ).toBe("Cookbook");
+  });
 });

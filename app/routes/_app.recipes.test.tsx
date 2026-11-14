@@ -43,10 +43,58 @@ const fixture = vi.hoisted(() => ({
     error: null as unknown,
     refetch: vi.fn(),
   },
+  recipeItems: {
+    data: {
+      items: [] as Array<Record<string, unknown>>,
+      pagination: {
+        offset: 0,
+        limit: 100,
+        totalItems: 0,
+        returnedItems: 0,
+        hasMore: false,
+      },
+    },
+    isLoading: false,
+    isError: false,
+    isFetching: false,
+    error: null as unknown,
+    refetch: vi.fn(),
+  },
+  searchDocuments: {
+    data: {
+      documents: [] as Array<Record<string, unknown>>,
+      pagination: { hasMore: false, nextOffset: null as number | null },
+    },
+    isLoading: false,
+    isError: false,
+    isFetching: false,
+    error: null as unknown,
+    refetch: vi.fn(),
+  },
+  cuisineMetadataSearch: {
+    data: {
+      documents: [] as Array<Record<string, unknown>>,
+      pagination: { hasMore: false, nextOffset: null as number | null },
+    },
+    isLoading: false,
+    isError: false,
+    isFetching: false,
+    error: null as unknown,
+    refetch: vi.fn(),
+  },
   search: "",
   listCalls: [] as Array<{ args: Record<string, unknown>; enabled: boolean }>,
+  searchCalls: [] as Array<{ args: Record<string, unknown>; enabled: boolean }>,
+  collectionCalls: [] as Array<{
+    args: Record<string, unknown>;
+    enabled: boolean;
+  }>,
   documentCalls: [] as Array<Record<string, unknown>>,
   scaleMutation: {
+    mutateAsync: vi.fn(),
+    isPending: false,
+  },
+  createMutation: {
     mutateAsync: vi.fn(),
     isPending: false,
   },
@@ -57,6 +105,7 @@ vi.mock("@agent-native/core/client/hooks", () => ({
   actionErrorMessage: (error: unknown) =>
     error instanceof Error ? error.message : undefined,
   useActionMutation: (name: string) => {
+    if (name === "create-recipe") return fixture.createMutation;
     if (name !== "start-recipe-scaling") {
       throw new Error(`Unexpected action mutation ${name}`);
     }
@@ -77,6 +126,81 @@ vi.mock("@agent-native/core/client/hooks", () => ({
     }
     if (name === "list-content-databases") return fixture.recipeDatabases;
     if (name === "get-content-database") return fixture.recipeDatabase;
+    if (name === "query-content-database-items") {
+      fixture.collectionCalls.push({
+        args: args ?? {},
+        enabled: options.enabled !== false,
+      });
+      const query = args?.tableQuery as
+        | {
+            search: string;
+            filters: Array<{
+              key: string;
+              value: string;
+              operator: "equals" | "contains";
+            }>;
+          }
+        | undefined;
+      const items = fixture.recipeItems.data.items as Array<{
+        document: { id: string; title: string | null };
+        properties: Array<{
+          definition: { id: string; name: string };
+          value: unknown;
+        }>;
+      }>;
+      const filteredItems = items.filter((item) => {
+        const values = item.properties.map((property) =>
+          Array.isArray(property.value)
+            ? property.value.join(" ")
+            : String(property.value ?? ""),
+        );
+        const text = [item.document.title ?? "", ...values]
+          .join(" ")
+          .toLocaleLowerCase();
+        return (
+          (!query?.search || text.includes(query.search.toLocaleLowerCase())) &&
+          (query?.filters ?? []).every((filter) => {
+            const property = item.properties.find(
+              (candidate) => candidate.definition.id === filter.key,
+            );
+            const value = Array.isArray(property?.value)
+              ? property.value.join(" ")
+              : String(property?.value ?? "");
+            return filter.operator === "equals"
+              ? value.toLocaleLowerCase() === filter.value.toLocaleLowerCase()
+              : value
+                  .toLocaleLowerCase()
+                  .includes(filter.value.toLocaleLowerCase());
+          })
+        );
+      });
+      const offset = Number(args?.offset ?? 0);
+      const limit = Number(args?.limit ?? 100);
+      const pageItems = filteredItems.slice(offset, offset + limit);
+      return {
+        ...fixture.recipeItems,
+        data: {
+          ...fixture.recipeItems.data,
+          items: pageItems,
+          pagination: {
+            offset,
+            limit,
+            totalItems: filteredItems.length,
+            returnedItems: pageItems.length,
+            hasMore: offset + pageItems.length < filteredItems.length,
+          },
+        },
+      };
+    }
+    if (name === "search-documents") {
+      fixture.searchCalls.push({
+        args: args ?? {},
+        enabled: options.enabled !== false,
+      });
+      return args?.query === "Cuisine"
+        ? fixture.cuisineMetadataSearch
+        : fixture.searchDocuments;
+    }
     if (name === "list-documents") {
       fixture.listCalls.push({
         args: args ?? {},
@@ -174,6 +298,10 @@ function clickButton(button: HTMLButtonElement | undefined) {
   act(() => button?.dispatchEvent(new MouseEvent("click", { bubbles: true })));
 }
 
+function last<T>(items: T[]) {
+  return items[items.length - 1];
+}
+
 function setupSelectedRecipe() {
   fixture.search = "?spaceId=caller-space-id&recipeId=recipe-stable-id";
   fixture.spaces.data = {
@@ -226,8 +354,36 @@ describe("Recipes library", () => {
     fixture.recipeDatabase.isError = false;
     fixture.recipeDatabase.isFetching = false;
     fixture.recipeDatabase.error = null;
+    fixture.recipeItems.data = {
+      items: [],
+      pagination: {
+        offset: 0,
+        limit: 100,
+        totalItems: 0,
+        returnedItems: 0,
+        hasMore: false,
+      },
+    };
+    fixture.recipeItems.isLoading = false;
+    fixture.recipeItems.isError = false;
+    fixture.recipeItems.isFetching = false;
+    fixture.recipeItems.error = null;
+    fixture.searchDocuments.data = {
+      documents: [],
+      pagination: { hasMore: false, nextOffset: null },
+    };
+    fixture.cuisineMetadataSearch.data = {
+      documents: [],
+      pagination: { hasMore: false, nextOffset: null },
+    };
+    fixture.searchDocuments.isLoading = false;
+    fixture.searchDocuments.isError = false;
+    fixture.searchDocuments.isFetching = false;
+    fixture.searchDocuments.error = null;
     fixture.search = "";
     fixture.listCalls = [];
+    fixture.searchCalls = [];
+    fixture.collectionCalls = [];
     fixture.documentCalls = [];
     fixture.scaleMutation.mutateAsync.mockReset();
     fixture.scaleMutation.mutateAsync.mockResolvedValue({
@@ -237,6 +393,25 @@ describe("Recipes library", () => {
       expiresAt: "2026-11-10T00:00:00.000Z",
     });
     fixture.scaleMutation.isPending = false;
+    fixture.createMutation.mutateAsync.mockReset();
+    fixture.createMutation.mutateAsync.mockResolvedValue({
+      itemId: "new-item",
+      documentId: "new-recipe",
+      urlPath: "/page/new-recipe",
+      receiptId: "new-receipt",
+      idempotency: {
+        key: "create-intent",
+        result: "applied",
+        payloadDigest: "payload-digest",
+      },
+      readback: {
+        verified: true,
+        title: "New recipe",
+        propertyValues: { Tags: '["weeknight"]' },
+        bodyHash: "body-hash",
+      },
+    });
+    fixture.createMutation.isPending = false;
     fixture.sendCalls = [];
     container = document.createElement("div");
     document.body.appendChild(container);
@@ -317,7 +492,7 @@ describe("Recipes library", () => {
     });
   });
 
-  it("filters recipe pages by cuisine and body tags while retaining legacy pages", () => {
+  it("searches complete recipe bodies and collection properties beyond loaded previews", () => {
     fixture.spaces.data = {
       spaces: [{ id: "caller-space-id", name: "Recipes", orgId: null }],
     };
@@ -325,19 +500,15 @@ describe("Recipes library", () => {
       data: {
         documents: [
           {
-            id: "soup",
+            id: "soup-row",
             title: "Tomato Soup",
-            contentPreview: "Tags: weeknight, vegetarian\nCuisine: Italian",
+            contentPreview:
+              "Tomato Soup Ingredients 4 tomatoes, 1 tsp salt Method Simmer until tender...",
           },
           {
-            id: "bread",
-            title: "Sourdough",
-            contentPreview: "Tags: baking; vegetarian\nCuisine: French",
-          },
-          {
-            id: "legacy",
+            id: "loaded-legacy",
             title: "Family Roast",
-            contentPreview: "Ingredients: potatoes\nInstructions: roast",
+            contentPreview: "Family Roast Ingredients potatoes Method roast...",
           },
         ],
         pagination: { hasMore: false, nextOffset: null },
@@ -348,27 +519,200 @@ describe("Recipes library", () => {
       error: null,
       refetch: vi.fn(),
     });
+    fixture.recipeDatabases.data = {
+      databases: [
+        {
+          databaseId: "recipes-database",
+          documentId: "recipes-database-document",
+          spaceId: "caller-space-id",
+          title: "Recipe collection",
+          description: "",
+        },
+      ],
+      pagination: { hasMore: false, nextOffset: null },
+    };
+    fixture.recipeDatabase.data = {
+      database: {
+        spaceId: "caller-space-id",
+        viewConfig: { activeViewId: "recipe-form", views: [] },
+      },
+      mutationContract: {
+        target: {
+          spaceId: "caller-space-id",
+          databaseId: "recipes-database",
+          databaseDocumentId: "recipes-database-document",
+        },
+        schemaRevision: "schema-1",
+        properties: [
+          { id: "cuisine-id", name: "Cuisine", type: "text" },
+          { id: "tags-id", name: "Tags", type: "text" },
+        ],
+      },
+    };
+    fixture.recipeItems.data = {
+      items: [
+        {
+          document: { id: "soup-row", title: "Tomato Soup" },
+          properties: [
+            {
+              definition: { id: "cuisine-id", name: "Cuisine" },
+              value: "Italian",
+            },
+            {
+              definition: { id: "tags-id", name: "Tags" },
+              value: '["weeknight","vegetarian"]',
+            },
+          ],
+        },
+        {
+          document: { id: "bread-row", title: "Sourdough" },
+          properties: [
+            {
+              definition: { id: "cuisine-id", name: "Cuisine" },
+              value: "French",
+            },
+            {
+              definition: { id: "tags-id", name: "Tags" },
+              value: '["baking","vegetarian"]',
+            },
+          ],
+        },
+        ...Array.from({ length: 100 }, (_, index) => ({
+          document: {
+            id: `soup-row-${index + 2}`,
+            title: `Tomato Soup ${index + 2}`,
+          },
+          properties: [
+            {
+              definition: { id: "cuisine-id", name: "Cuisine" },
+              value: "Italian",
+            },
+            {
+              definition: { id: "tags-id", name: "Tags" },
+              value: '["weeknight","vegetarian"]',
+            },
+          ],
+        })),
+      ],
+      pagination: {
+        offset: 0,
+        limit: 100,
+        totalItems: 102,
+        returnedItems: 100,
+        hasMore: true,
+      },
+    };
+    fixture.searchDocuments.data = {
+      documents: [
+        {
+          id: "unloaded-legacy",
+          title: "Family Bowl",
+          snippet: "...Cuisine: Italian Tags: vegetarian...",
+        },
+        {
+          id: "soup-row",
+          title: "Tomato Soup",
+          snippet: "...Cuisine: Italian Tags: vegetarian...",
+        },
+      ],
+      pagination: { hasMore: true, nextOffset: 100 },
+    };
+    fixture.cuisineMetadataSearch.data = {
+      documents: [
+        {
+          id: "legacy-italian",
+          title: "Family Bowl",
+          snippet: "...Cuisine: Italian Tags: vegetarian...",
+        },
+        {
+          id: "legacy-british",
+          title: "Family Roast",
+          snippet: "...Cuisine: British Tags: family...",
+        },
+      ],
+      pagination: { hasMore: false, nextOffset: null },
+    };
     render(root);
 
     const search = container.querySelector<HTMLInputElement>(
       "#recipe-library-search",
     )!;
     setValue(search, "vegetarian");
-    expect(container.querySelector('[href*="recipeId=soup"]')).not.toBeNull();
-    expect(container.querySelector('[href*="recipeId=bread"]')).not.toBeNull();
-    expect(container.querySelector('[href*="recipeId=legacy"]')).toBeNull();
+    expect(
+      [
+        ...container.querySelectorAll<HTMLOptionElement>(
+          "#recipe-cuisine-filter option",
+        ),
+      ].map((option) => option.value),
+    ).toContain("British");
+    expect(
+      container.querySelector('[href*="recipeId=unloaded-legacy"]'),
+    ).not.toBeNull();
+    expect(
+      container.querySelector('[href*="recipeId=soup-row"]'),
+    ).not.toBeNull();
+    expect(
+      container.querySelector('[href*="recipeId=loaded-legacy"]'),
+    ).toBeNull();
+    expect(
+      last(
+        fixture.searchCalls.filter(({ args }) => args.query === "vegetarian"),
+      )?.args,
+    ).toEqual(
+      expect.objectContaining({
+        query: "vegetarian",
+        spaceId: "caller-space-id",
+        documentType: "page",
+        offset: 0,
+      }),
+    );
 
     const cuisine = container.querySelector<HTMLSelectElement>(
       "#recipe-cuisine-filter",
     )!;
-    setValue(search, "");
     setValue(cuisine, "Italian");
-    expect(container.querySelector('[href*="recipeId=soup"]')).not.toBeNull();
-    expect(container.querySelector('[href*="recipeId=bread"]')).toBeNull();
-    expect(container.querySelector('[href*="recipeId=legacy"]')).toBeNull();
+    expect(
+      container.querySelector('[href*="recipeId=unloaded-legacy"]'),
+    ).not.toBeNull();
+    expect(container.querySelector('[href*="recipeId=bread-row"]')).toBeNull();
+    const collectionQuery = last(fixture.collectionCalls)?.args.tableQuery as {
+      filters: Array<{ key: string; value: string }>;
+    };
+    expect(collectionQuery.filters).toContainEqual(
+      expect.objectContaining({ key: "cuisine-id", value: "Italian" }),
+    );
+    expect([...cuisine.options].map((option) => option.value)).toContain(
+      "Italian",
+    );
+    setValue(search, "");
+    setValue(cuisine, "");
+    const tag =
+      container.querySelector<HTMLInputElement>("#recipe-tag-filter")!;
+    setValue(tag, "weeknight");
+    const tagQuery = last(fixture.collectionCalls)?.args.tableQuery as {
+      filters: Array<{ key: string; value: string }>;
+    };
+    expect(tagQuery.filters).toContainEqual(
+      expect.objectContaining({ key: "tags-id", value: "weeknight" }),
+    );
+    const loadMore = [...container.querySelectorAll("button")].find((button) =>
+      button.textContent?.includes("recipes.loadMoreMatches"),
+    );
+    expect(loadMore).toBeDefined();
+    clickButton(loadMore);
+    expect(
+      container.querySelector('[href*="recipeId=soup-row-101"]'),
+    ).not.toBeNull();
+    expect(
+      fixture.collectionCalls.some(({ args }) => args.offset === 100),
+    ).toBe(true);
+    expect(
+      last(fixture.searchCalls.filter(({ args }) => args.query !== "Cuisine"))
+        ?.args.offset,
+    ).toBe(100);
   });
 
-  it("opens the in-shell recipe form when creation is available", () => {
+  it("creates a recipe through the shared action and exposes its saved link", async () => {
     fixture.spaces.data = {
       spaces: [{ id: "caller-space-id", name: "Recipes", orgId: null }],
     };
@@ -412,29 +756,7 @@ describe("Recipes library", () => {
         schemaRevision: "schema-1",
       },
     };
-    act(() =>
-      root.render(
-        <RecipesLibrary
-          createRecipe={async () => ({
-            itemId: "new-item",
-            documentId: "new-recipe",
-            urlPath: "/page/new-recipe",
-            receiptId: "new-receipt",
-            idempotency: {
-              key: "create-intent",
-              result: "applied",
-              payloadDigest: "payload-digest",
-            },
-            readback: {
-              verified: true,
-              title: "New recipe",
-              propertyValues: {},
-              bodyHash: "body-hash",
-            },
-          })}
-        />,
-      ),
-    );
+    render(root);
 
     const addRecipe = [...container.querySelectorAll("button")].find(
       (button) => button.textContent === "recipes.addRecipe",
@@ -443,6 +765,53 @@ describe("Recipes library", () => {
     clickButton(addRecipe);
     expect(container.textContent).toContain("recipes.recipeTitle");
     expect(container.textContent).toContain("recipes.ingredientGroups");
+
+    const title = [...container.querySelectorAll("label")].find(
+      (label) => label.textContent === "recipes.recipeTitle",
+    );
+    setValue(
+      container.querySelector<HTMLInputElement>(`#${title?.htmlFor}`)!,
+      "New recipe",
+    );
+    const fields = container.querySelectorAll<HTMLTextAreaElement>("textarea");
+    for (const [field, value] of [
+      [fields[0], "2 cups vegetables"],
+      [fields[1], "Roast until tender."],
+    ] as const) {
+      act(() => {
+        const setter = Object.getOwnPropertyDescriptor(
+          HTMLTextAreaElement.prototype,
+          "value",
+        )?.set;
+        setter?.call(field, value);
+        field.dispatchEvent(new Event("input", { bubbles: true }));
+        field.dispatchEvent(new Event("change", { bubbles: true }));
+      });
+    }
+    const form = container.querySelector("form")!;
+    await act(async () => {
+      form.dispatchEvent(
+        new Event("submit", { bubbles: true, cancelable: true }),
+      );
+      await Promise.resolve();
+    });
+    expect(fixture.createMutation.mutateAsync).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: "New recipe",
+        target: {
+          spaceId: "caller-space-id",
+          databaseId: "recipes-database",
+          databaseDocumentId: "recipes-database-document",
+        },
+        formViewId: "recipe-form",
+        expectedSchemaRevision: "schema-1",
+        ingredientGroups: [{ name: null, entries: ["2 cups vegetables"] }],
+        instructionGroups: [{ name: null, entries: ["Roast until tender."] }],
+      }),
+    );
+    expect(
+      container.querySelector('a[href="/page/new-recipe"]'),
+    ).not.toBeNull();
 
     const cancel = [...container.querySelectorAll("button")].find(
       (button) => button.textContent === "recipes.cancel",

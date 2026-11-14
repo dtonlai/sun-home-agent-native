@@ -146,8 +146,24 @@ export function RecipeCreationForm({
         entries: lines(group.text),
       }))
       .filter((group) => group.entries.length > 0);
+    const hasNamedEmptyGroup = [...ingredientGroups, ...instructionGroups].some(
+      (group) => group.name.trim() && lines(group.text).length === 0,
+    );
+    if (hasNamedEmptyGroup) {
+      setError(t("recipes.namedGroupNeedsEntries"));
+      return;
+    }
     if (ingredients.length === 0 || instructions.length === 0) {
       setError(t("recipes.createSectionsRequired"));
+      return;
+    }
+    const hasPartialNote = notes.some((note) => {
+      const hasTitle = Boolean(note.title.trim());
+      const hasBody = Boolean(note.text.trim());
+      return hasTitle !== hasBody;
+    });
+    if (hasPartialNote) {
+      setError(t("recipes.noteNeedsTitleAndDetails"));
       return;
     }
     const validNotes = notes
@@ -159,13 +175,22 @@ export function RecipeCreationForm({
         url: source.url.trim(),
       }))
       .filter((source) => source.url);
+    if (sources.some((source) => source.title.trim() && !source.url.trim())) {
+      setError(t("recipes.sourceNeedsUrl"));
+      return;
+    }
+    const submittedTags = addUniqueTag(tags, tagDraft);
+    if (tagDraft.trim()) {
+      setTags(submittedTags);
+      setTagDraft("");
+    }
     const intent = {
       title: title.trim(),
       servings: servings.trim() ? servings : null,
       ingredientGroups: ingredients,
       instructionGroups: instructions,
       notes: validNotes,
-      tags,
+      tags: submittedTags,
       cuisine: cuisine.trim() ? cuisine : null,
       sourceLinks,
       additionalNfm,
