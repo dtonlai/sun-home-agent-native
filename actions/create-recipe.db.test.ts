@@ -5,7 +5,7 @@ import { join } from "node:path";
 
 import { withMigrationRuntime } from "@agent-native/core/db";
 import { runWithRequestContext } from "@agent-native/core/server";
-import { eq, sql } from "drizzle-orm";
+import { eq, inArray, sql } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 const TEST_DB_PATH = join(
@@ -462,9 +462,22 @@ describe("create-recipe", () => {
     `),
     );
 
-    await expect(
-      asUser(OWNER, () => createRecipe.run(args as any)),
-    ).rejects.toThrow("injected recipe receipt failure");
+    let failure: unknown;
+    try {
+      await asUser(OWNER, () => createRecipe.run(args as any));
+    } catch (error) {
+      failure = error;
+    }
+    expect(failure).toBeInstanceOf(Error);
+    const errorMessages: string[] = [];
+    let cause: unknown = failure;
+    while (cause instanceof Error) {
+      errorMessages.push(cause.message);
+      cause = (cause as Error & { cause?: unknown }).cause;
+    }
+    expect(errorMessages.join("\n")).toContain(
+      "injected recipe receipt failure",
+    );
 
     const items = await getDb()
       .select({ id: schema.contentDatabaseItems.id })
@@ -474,6 +487,16 @@ describe("create-recipe", () => {
       .select({ id: schema.documents.id })
       .from(schema.documents)
       .where(eq(schema.documents.parentId, recipesDocumentId));
+    const propertyValues = await getDb()
+      .select({ id: schema.documentPropertyValues.id })
+      .from(schema.documentPropertyValues)
+      .where(
+        inArray(schema.documentPropertyValues.propertyId, [
+          tagPropertyId,
+          cuisinePropertyId,
+          servingsPropertyId,
+        ]),
+      );
     const receipts = await getDb()
       .select({ id: schema.contentDatabaseRowMutationReceipts.id })
       .from(schema.contentDatabaseRowMutationReceipts)
@@ -485,6 +508,7 @@ describe("create-recipe", () => {
       );
     expect(items).toHaveLength(0);
     expect(childDocuments).toHaveLength(0);
+    expect(propertyValues).toHaveLength(0);
     expect(receipts).toHaveLength(0);
     await getDb().execute(
       sql.raw(

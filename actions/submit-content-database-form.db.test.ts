@@ -2,7 +2,7 @@ import { rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { getDbExec } from "@agent-native/core/db";
+import { getDbExec, withMigrationRuntime } from "@agent-native/core/db";
 import { runWithRequestContext } from "@agent-native/core/server";
 import { and, eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -27,8 +27,11 @@ beforeAll(async () => {
   getDb = dbModule.getDb;
   schema = dbModule.schema;
   submitForm = (await import("./submit-content-database-form.js")).default;
-  const plugin = (await import("../server/plugins/db.js")).default;
-  await plugin(undefined as any);
+  const database = await import("../server/plugins/db.js");
+  await withMigrationRuntime(async () => {
+    await database.runContentMigrations(null);
+    await database.runContentSourceMigrations(null);
+  });
   const { systemIdsForContentSpace } = await import("./_content-spaces.js");
   spaceId = `form_space_${Date.now()}`;
   const filesIds = systemIdsForContentSpace(spaceId, "files");
