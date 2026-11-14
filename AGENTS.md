@@ -64,13 +64,33 @@ Relevant installed skill guides may include `content`, `document-editing`, `acti
 ## Recipes v2.0 boundaries
 
 - For the read-only Recipes library workflow, locate the caller-authorized space
-  named exactly `Recipes` with `list-content-spaces`. Browse ordinary pages with
-  `list-documents` (`documentType: "page"`, following pagination on demand) and
-  read a selected page with `get-document` by its stable Content ID. Confirm
-  the returned document belongs to the selected Recipes space before showing
-  it. Use the Recipes route for navigation and retain the stable ID in its URL.
-  Keep these operations read-only; never create a Recipes space or create, move,
-  or edit Content automatically.
+  named exactly `Recipes` with `list-content-spaces`. Keep ordinary recipe pages
+  as a fallback using `list-documents` (`documentType: "page"`, following
+  pagination on demand); read a selected page with `get-document` by its stable
+  Content ID. Read collection-backed recipes and their properties through
+  `get-content-database` or `query-content-database-items` using the stable
+  collection ID. Confirm each selected page/row belongs to the selected Recipes
+  space before showing it. Use the Recipes route for navigation and retain the
+  stable page ID in its URL. Browsing stays read-only. Never create a Recipes
+  space or create, move, or edit Content merely because a recipe was viewed.
+- For explicit recipe creation, call the registered `create-recipe` action only
+  after the user asks to create or save a recipe. Resolve the authorized
+  `Recipes` space and existing collection, then pass the exact collection target,
+  `formViewId`, a fresh `schemaRevision`, and a stable idempotency key for that
+  unchanged submission. Retry an ambiguous result with the same key and
+  identical input; use a new key for a changed recipe. The action writes one row
+  and returns its stable Content IDs, receipt, and verified read-back. It never
+  provisions a collection or changes a source recipe. The existing collection
+  must have a `Tags` property of type `text` so freely entered tags remain
+  searchable.
+- To create from an existing recipe page, use Content search/list actions to
+  locate it and `get-document` to read its stable ID. For a user-provided video
+  description, use only description/transcript text already supplied or
+  available through existing safe actions; do not claim to watch the video,
+  scrape it, or add a bespoke fetcher. Preserve all supplied source links and
+  their titles. When measurements, timing, or other source details are
+  uncertain, keep that uncertainty in a titled recipe note or ask the user;
+  never silently invent a value. Do not edit the source page.
 - For explicit scaling, the Recipes UI alone calls `start-recipe-scaling` after
   the user presses Scale; changing a factor is local-only. The UI sends only
   `{ documentId, factor }` as chat context and the opaque grant in `actionScope`.

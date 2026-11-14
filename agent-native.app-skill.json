@@ -29,6 +29,11 @@
       "id": "sun-home-local-files",
       "action": "share-local-file-document",
       "path": "/local-files"
+    },
+    {
+      "id": "sun-home-recipes",
+      "action": "create-recipe",
+      "path": "/recipes"
     }
   ],
   "skills": [
