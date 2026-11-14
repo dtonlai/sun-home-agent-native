@@ -14,15 +14,17 @@ import { Link, useSearchParams } from "react-router";
 import { QueryErrorState } from "@/components/QueryErrorState";
 import { parseRecipeContent } from "@/components/recipes/recipe-content";
 import {
+  adaptRecipeCreateInput,
+  adaptRecipeCreateResult,
+  type RecipeCreateActionInput,
+  type RecipeCreateActionResult,
+} from "@/components/recipes/recipe-create-adapter";
+import {
   cuisineOptions,
   filterRecipeEntries,
   type RecipeListEntry,
 } from "@/components/recipes/recipe-library-filtering";
-import {
-  RecipeCreationForm,
-  type CreatedRecipe,
-  type RecipeDraftInput,
-} from "@/components/recipes/RecipeCreationForm";
+import { RecipeCreationForm } from "@/components/recipes/RecipeCreationForm";
 import { RecipeMarkdown } from "@/components/recipes/RecipeMarkdown";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -282,17 +284,8 @@ export function RecipesLibrary({
   createRecipe,
 }: {
   createRecipe?: (
-    recipe: RecipeDraftInput,
-    destination: {
-      target: {
-        spaceId: string;
-        databaseId: string;
-        databaseDocumentId: string;
-      };
-      formViewId: string;
-      expectedSchemaRevision: string;
-    },
-  ) => Promise<CreatedRecipe>;
+    input: RecipeCreateActionInput,
+  ) => Promise<RecipeCreateActionResult>;
 } = {}) {
   const t = useT();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -826,8 +819,8 @@ export function RecipesLibrary({
                 ) : null}
                 <RecipeCreationForm
                   onCancel={() => setIsCreatingRecipe(false)}
-                  onCreate={(recipe) =>
-                    createRecipe(recipe, {
+                  onCreate={(recipe) => {
+                    const input = adaptRecipeCreateInput(recipe, {
                       target: {
                         spaceId: mutationContract.target.spaceId,
                         databaseId: mutationContract.target.databaseId,
@@ -836,8 +829,9 @@ export function RecipesLibrary({
                       },
                       formViewId: selectedFormView.id,
                       expectedSchemaRevision: mutationContract.schemaRevision,
-                    })
-                  }
+                    });
+                    return createRecipe(input).then(adaptRecipeCreateResult);
+                  }}
                 />
               </>
             )

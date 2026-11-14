@@ -416,8 +416,21 @@ describe("Recipes library", () => {
       root.render(
         <RecipesLibrary
           createRecipe={async () => ({
+            itemId: "new-item",
             documentId: "new-recipe",
             urlPath: "/page/new-recipe",
+            receiptId: "new-receipt",
+            idempotency: {
+              key: "create-intent",
+              result: "applied",
+              payloadDigest: "payload-digest",
+            },
+            readback: {
+              verified: true,
+              title: "New recipe",
+              propertyValues: {},
+              bodyHash: "body-hash",
+            },
           })}
         />,
       ),
