@@ -50,6 +50,9 @@ async function seedRecipesCollection() {
   tagPropertyId = `recipe_tags_${suffix}`;
   cuisinePropertyId = `recipe_cuisine_${suffix}`;
   servingsPropertyId = `recipe_servings_${suffix}`;
+  const filesIds = (
+    await import("./_content-spaces.js")
+  ).systemIdsForContentSpace(recipesSpaceId, "files");
   const now = new Date().toISOString();
   await getDb()
     .insert(schema.contentSpaces)
@@ -58,11 +61,31 @@ async function seedRecipesCollection() {
       name: "Recipes",
       kind: "personal",
       ownerEmail: OWNER,
-      filesDatabaseId: `recipes_files_database_${suffix}`,
+      filesDatabaseId: filesIds.databaseId,
       createdBy: OWNER,
       createdAt: now,
       updatedAt: now,
     });
+  await getDb().insert(schema.documents).values({
+    id: filesIds.documentId,
+    spaceId: recipesSpaceId,
+    ownerEmail: OWNER,
+    title: "Files",
+    content: "",
+    visibility: "private",
+    createdAt: now,
+    updatedAt: now,
+  });
+  await getDb().insert(schema.contentDatabases).values({
+    id: filesIds.databaseId,
+    spaceId: recipesSpaceId,
+    systemRole: "files",
+    ownerEmail: OWNER,
+    documentId: filesIds.documentId,
+    title: "Files",
+    createdAt: now,
+    updatedAt: now,
+  });
   await getDb().insert(schema.documents).values({
     id: recipesDocumentId,
     spaceId: recipesSpaceId,
