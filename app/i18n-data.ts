@@ -1409,9 +1409,22 @@ const enUS = {
     title: "Recipes",
     library: "Recipe library",
     viewer: "Selected recipe",
-    librarySearch: "Search recipes, cuisine, or tags",
+    librarySearch: "Search recipe titles and details",
+    filterTags: "Filter by tag",
     filterCuisine: "Cuisine",
     allCuisines: "All cuisines",
+    filterCoverage:
+      "Search checks full recipe bodies and collection properties. Load more to continue through matching pages.",
+    filterMetadataUnavailable:
+      "This collection has no matching metadata property. Search still checks full recipe bodies and legacy pages.",
+    filterChooseCollection:
+      "Choose a collection to include its Cuisine and Tags properties. Full recipe body search is still available.",
+    loadMoreMatches: "Load more matching recipes",
+    searchError: "Could not search recipe content.",
+    collectionReadError: "Could not read recipe collection properties.",
+    filterCollectionsError:
+      "Could not load recipe collections for property filters.",
+    cuisineOptionsError: "Could not load cuisine filter choices.",
     noMatchingRecipes: "No recipes match these filters.",
     clearFilters: "Clear filters",
     chooseSpaceTitle: "Choose a Recipes space",
@@ -1426,6 +1439,14 @@ const enUS = {
     spacesError: "Could not load your Content spaces.",
     listError: "Could not load recipes.",
     documentError: "Could not load this recipe.",
+    createCollectionError:
+      "Could not load Content collections for recipe creation.",
+    createCollectionMissing:
+      "No Content collection is available in this Recipes space.",
+    createCollectionUnavailable:
+      "The selected Content collection is not available in this Recipes space.",
+    createFormUnavailable:
+      "The selected collection does not have a current Form view for recipe creation.",
     retry: "Try again",
     noRecipes: "There are no pages in this Recipes space yet.",
     selectRecipe: "Choose a recipe to view its details.",
@@ -1473,6 +1494,11 @@ const enUS = {
     remove: "Remove",
     createSectionsRequired: "Add at least one ingredient and one instruction.",
     createTitleRequired: "Enter a recipe title of 1–500 characters.",
+    namedGroupNeedsEntries:
+      "Add an entry to each named ingredient or instruction group.",
+    noteNeedsTitleAndDetails:
+      "Complete both the title and details for each note, or remove the empty note.",
+    sourceNeedsUrl: "Add a URL for each named source, or remove the source.",
     notesOptional: "Notes (optional)",
     noteNumber: "Note {{number}}",
     noteTitle: "Note title",
