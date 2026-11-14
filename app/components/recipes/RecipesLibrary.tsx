@@ -7,12 +7,30 @@ import {
 } from "@agent-native/core/client/hooks";
 import { useT } from "@agent-native/core/client/i18n";
 import { useSetPageTitle } from "@agent-native/toolkit/app-shell";
-import type { Document } from "@shared/api";
+import type {
+  ContentDatabaseItemsPagePayload,
+  ContentDatabaseResponsePayload,
+  Document,
+} from "@shared/api";
 import { useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router";
 
 import { QueryErrorState } from "@/components/QueryErrorState";
 import { parseRecipeContent } from "@/components/recipes/recipe-content";
+import {
+  adaptRecipeCreateInput,
+  adaptRecipeCreateResult,
+  type RecipeCreateActionInput,
+  type RecipeCreateActionResult,
+} from "@/components/recipes/recipe-create-adapter";
+import {
+  cuisineOptions,
+  buildRecipeCollectionTableQuery,
+  buildRecipeDocumentSearchQuery,
+  recipeEntryFromCollectionItem,
+  type RecipeListEntry,
+} from "@/components/recipes/recipe-library-filtering";
+import { RecipeCreationForm } from "@/components/recipes/RecipeCreationForm";
 import { RecipeMarkdown } from "@/components/recipes/RecipeMarkdown";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -20,10 +38,7 @@ import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import "@/components/recipes/RecipeScalingResult";
 
-type RecipeListItem = {
-  id: string;
-  title: string | null;
-};
+type RecipeListItem = RecipeListEntry;
 
 type RecipePageState = {
   spaceId: string;
@@ -34,11 +49,33 @@ type RecipePageState = {
   };
 };
 
+type RecipeCollectionItem = {
+  document: { id: string; title: string | null };
+  properties: Array<{ definition: { name: string }; value: unknown }>;
+};
+
+type RemotePageState<T> = {
+  key: string;
+  pages: Map<number, T[]>;
+  pagination: { hasMore: boolean; nextOffset: number | null };
+};
+
 const PAGE_SIZE = 100;
 
 function appendUnique(previous: RecipeListItem[], incoming: RecipeListItem[]) {
   const known = new Set(previous.map((item) => item.id));
   return [...previous, ...incoming.filter((item) => !known.has(item.id))];
+}
+
+function sameCollectionPage(
+  previous: RecipeCollectionItem[] | undefined,
+  incoming: RecipeCollectionItem[],
+) {
+  return Boolean(
+    previous &&
+    previous.length === incoming.length &&
+    previous.every((item, index) => item === incoming[index]),
+  );
 }
 
 function PageError({
@@ -276,8 +313,23 @@ export function RecipesLibrary() {
   const [searchParams, setSearchParams] = useSearchParams();
   const selectedRecipeId = searchParams.get("recipeId")?.trim() || null;
   const requestedSpaceId = searchParams.get("spaceId")?.trim() || null;
+  const [recipeSearch, setRecipeSearch] = useState("");
+  const [cuisineFilter, setCuisineFilter] = useState("");
+  const [tagFilter, setTagFilter] = useState("");
+  const [isCreatingRecipe, setIsCreatingRecipe] = useState(false);
+  const [selectedRecipeDatabaseId, setSelectedRecipeDatabaseId] = useState<
+    string | null
+  >(null);
   const { session } = useSession();
   const viewerScope = [session?.email ?? null, session?.orgId ?? null] as const;
+  // The shared create-recipe action is introduced by the dependent B1-T11 PR.
+  // This explicit adapter contract keeps the UI aligned while this change is
+  // reviewed against main, where the generated action registry does not yet
+  // contain that action name.
+  const createRecipeMutation = useActionMutation<
+    RecipeCreateActionResult,
+    RecipeCreateActionInput
+  >("create-recipe" as never);
   useSetPageTitle(t("recipes.title"));
 
   // This is a read of the caller's authorized spaces. Recipes never provisions
@@ -324,6 +376,163 @@ export function RecipesLibrary() {
       retry: false,
     },
   );
+  const recipeDatabasesQuery = useActionQuery(
+    "list-content-databases",
+    activeSpace ? { spaceId: activeSpace.id, limit: 50, offset: 0 } : undefined,
+    {
+      enabled: Boolean(activeSpace),
+      queryKeyScope: viewerScope,
+      retry: false,
+    },
+  );
+  const recipeDatabases = recipeDatabasesQuery.data?.databases ?? [];
+  const selectedDatabaseId =
+    selectedRecipeDatabaseId &&
+    recipeDatabases.some(
+      (database: { databaseId: string }) =>
+        database.databaseId === selectedRecipeDatabaseId,
+    )
+      ? selectedRecipeDatabaseId
+      : recipeDatabases.length === 1
+        ? recipeDatabases[0]?.databaseId
+        : null;
+  const recipeDatabaseQuery = useActionQuery(
+    "get-content-database",
+    selectedDatabaseId
+      ? { databaseId: selectedDatabaseId, limit: 0 }
+      : undefined,
+    {
+      enabled: Boolean(activeSpace && selectedDatabaseId),
+      queryKeyScope: viewerScope,
+      retry: false,
+    },
+  );
+  const recipeDatabaseResponse = recipeDatabaseQuery.data;
+  const recipeDatabase =
+    recipeDatabaseResponse && "database" in recipeDatabaseResponse
+      ? (recipeDatabaseResponse as ContentDatabaseResponsePayload)
+      : undefined;
+  const recipeDatabaseSpaceId = recipeDatabase?.database?.spaceId;
+  const mutationContract = recipeDatabase?.mutationContract;
+  const formViews = (recipeDatabase?.database?.viewConfig?.views ?? []).filter(
+    (view: { type: string }) => view.type === "form",
+  );
+  const selectedFormView =
+    formViews.find(
+      (view: { id: string }) =>
+        view.id === recipeDatabase?.database?.viewConfig?.activeViewId,
+    ) ?? formViews[0];
+
+  const recipeProperties = mutationContract?.properties ?? [];
+  const cuisineProperty = recipeProperties.find(
+    (property) => property.name.trim().toLocaleLowerCase() === "cuisine",
+  );
+  const tagsProperty = recipeProperties.find(
+    (property) => property.name.trim().toLocaleLowerCase() === "tags",
+  );
+  const collectionTableQuery = useMemo(
+    () =>
+      buildRecipeCollectionTableQuery({
+        search: recipeSearch,
+        cuisine: cuisineFilter,
+        tag: tagFilter,
+        cuisineProperty,
+        tagsProperty,
+      }),
+    [
+      recipeSearch,
+      cuisineFilter,
+      tagFilter,
+      cuisineProperty?.id,
+      cuisineProperty?.name,
+      tagsProperty?.id,
+      tagsProperty?.name,
+    ],
+  );
+  const documentSearchText = buildRecipeDocumentSearchQuery(
+    recipeSearch,
+    cuisineFilter,
+    tagFilter,
+  );
+  const hasActiveFilters = Boolean(documentSearchText);
+  const metadataFilterRequested = Boolean(cuisineFilter || tagFilter);
+  const missingMetadataFilter = Boolean(
+    metadataFilterRequested &&
+    ((recipeDatabasesQuery.data && recipeDatabases.length === 0) ||
+      (recipeDatabase &&
+        ((cuisineFilter && !cuisineProperty) || (tagFilter && !tagsProperty)))),
+  );
+  const collectionChoiceRequired = Boolean(
+    metadataFilterRequested &&
+    recipeDatabases.length > 1 &&
+    !selectedDatabaseId,
+  );
+  const currentSearchKey = JSON.stringify([
+    activeSpace?.id,
+    documentSearchText,
+  ]);
+  const [requestedSearchPage, setRequestedSearchPage] = useState<{
+    key: string;
+    offset: number;
+  } | null>(null);
+  const searchOffset =
+    requestedSearchPage?.key === currentSearchKey
+      ? requestedSearchPage.offset
+      : 0;
+  const searchDocumentsQuery = useActionQuery(
+    "search-documents",
+    activeSpace && documentSearchText
+      ? {
+          query: documentSearchText,
+          limit: PAGE_SIZE,
+          offset: searchOffset,
+          spaceId: activeSpace.id,
+          documentType: "page",
+        }
+      : undefined,
+    {
+      enabled: Boolean(activeSpace && documentSearchText),
+      queryKeyScope: viewerScope,
+      retry: false,
+    },
+  );
+  const currentCollectionKey = JSON.stringify([
+    activeSpace?.id,
+    selectedDatabaseId,
+    recipeSearch.trim(),
+    cuisineFilter.trim(),
+    tagFilter.trim(),
+  ]);
+  const [requestedCollectionPage, setRequestedCollectionPage] = useState<{
+    key: string;
+    offset: number;
+  } | null>(null);
+  const collectionOffset =
+    requestedCollectionPage?.key === currentCollectionKey
+      ? requestedCollectionPage.offset
+      : 0;
+  const collectionItemsQuery = useActionQuery(
+    "query-content-database-items",
+    selectedDatabaseId && !missingMetadataFilter
+      ? {
+          databaseId: selectedDatabaseId,
+          limit: PAGE_SIZE,
+          offset: collectionOffset,
+          tableQuery: collectionTableQuery,
+          compactRows: false,
+        }
+      : undefined,
+    {
+      enabled: Boolean(
+        activeSpace &&
+        selectedDatabaseId &&
+        recipeDatabase &&
+        !missingMetadataFilter,
+      ),
+      queryKeyScope: viewerScope,
+      retry: false,
+    },
+  );
 
   const [pageState, setPageState] = useState<RecipePageState | null>(null);
   useEffect(() => {
@@ -342,6 +551,109 @@ export function RecipesLibrary() {
     });
   }, [activeSpace, documentsQuery.data, pageOffset]);
 
+  const [searchPageState, setSearchPageState] =
+    useState<RemotePageState<RecipeListItem> | null>(null);
+  useEffect(() => {
+    if (!documentSearchText || !searchDocumentsQuery.data) return;
+    setSearchPageState((previous) => {
+      const pages =
+        previous?.key === currentSearchKey
+          ? new Map(previous.pages)
+          : new Map<number, RecipeListItem[]>();
+      pages.set(searchOffset, searchDocumentsQuery.data.documents);
+      return {
+        key: currentSearchKey,
+        pages,
+        pagination: searchDocumentsQuery.data.pagination,
+      };
+    });
+  }, [
+    currentSearchKey,
+    documentSearchText,
+    searchDocumentsQuery.data,
+    searchOffset,
+  ]);
+
+  const collectionResponse = collectionItemsQuery.data;
+  const collectionPage =
+    collectionResponse && "items" in collectionResponse
+      ? (collectionResponse as ContentDatabaseItemsPagePayload)
+      : undefined;
+  const [collectionPageState, setCollectionPageState] =
+    useState<RemotePageState<RecipeCollectionItem> | null>(null);
+  const collectionIndexKey = JSON.stringify([
+    activeSpace?.id,
+    selectedDatabaseId,
+  ]);
+  const [collectionIndexState, setCollectionIndexState] =
+    useState<RemotePageState<RecipeCollectionItem> | null>(null);
+  useEffect(() => {
+    if (!collectionPage?.pagination) return;
+    const nextPagination = {
+      hasMore: collectionPage.pagination.hasMore,
+      nextOffset: collectionPage.pagination.hasMore
+        ? collectionPage.pagination.offset +
+          collectionPage.pagination.returnedItems
+        : null,
+    };
+    const responseItems = collectionPage.items as RecipeCollectionItem[];
+    setCollectionPageState((previous) => {
+      const previousPage =
+        previous?.key === currentCollectionKey
+          ? previous.pages.get(collectionOffset)
+          : undefined;
+      if (
+        previous?.key === currentCollectionKey &&
+        sameCollectionPage(previousPage, responseItems) &&
+        previous.pagination.hasMore === nextPagination.hasMore &&
+        previous.pagination.nextOffset === nextPagination.nextOffset
+      ) {
+        return previous;
+      }
+      const pages =
+        previous?.key === currentCollectionKey
+          ? new Map(previous.pages)
+          : new Map<number, RecipeCollectionItem[]>();
+      pages.set(collectionOffset, responseItems);
+      return {
+        key: currentCollectionKey,
+        pages,
+        pagination: nextPagination,
+      };
+    });
+    if (!hasActiveFilters) {
+      setCollectionIndexState((previous) => {
+        const previousPage =
+          previous?.key === collectionIndexKey
+            ? previous.pages.get(collectionOffset)
+            : undefined;
+        if (
+          previous?.key === collectionIndexKey &&
+          sameCollectionPage(previousPage, responseItems) &&
+          previous.pagination.hasMore === nextPagination.hasMore &&
+          previous.pagination.nextOffset === nextPagination.nextOffset
+        ) {
+          return previous;
+        }
+        const pages =
+          previous?.key === collectionIndexKey
+            ? new Map(previous.pages)
+            : new Map<number, RecipeCollectionItem[]>();
+        pages.set(collectionOffset, responseItems);
+        return {
+          key: collectionIndexKey,
+          pages,
+          pagination: nextPagination,
+        };
+      });
+    }
+  }, [
+    collectionOffset,
+    collectionPage,
+    collectionIndexKey,
+    currentCollectionKey,
+    hasActiveFilters,
+  ]);
   const recipeDocuments = useMemo(() => {
     if (!activeSpace || pageState?.spaceId !== activeSpace.id) return [];
     const pages = [...pageState.pages.entries()].sort(([a], [b]) => a - b);
@@ -350,6 +662,57 @@ export function RecipesLibrary() {
       [],
     );
   }, [activeSpace, pageState]);
+  const searchedRecipeDocuments = useMemo(() => {
+    if (searchPageState?.key !== currentSearchKey) return [];
+    return [...searchPageState.pages.entries()]
+      .sort(([left], [right]) => left - right)
+      .reduce<RecipeListItem[]>((all, [, page]) => appendUnique(all, page), []);
+  }, [currentSearchKey, searchPageState]);
+  const collectionItems = useMemo(() => {
+    if (collectionPageState?.key !== currentCollectionKey) return [];
+    return [...collectionPageState.pages.entries()]
+      .sort(([left], [right]) => left - right)
+      .reduce<RecipeCollectionItem[]>((all, [, page]) => {
+        const known = new Set(all.map((item) => item.document.id));
+        return [...all, ...page.filter((item) => !known.has(item.document.id))];
+      }, []);
+  }, [currentCollectionKey, collectionPageState]);
+  const collectionIndexItems = useMemo(() => {
+    if (collectionIndexState?.key !== collectionIndexKey) return [];
+    return [...collectionIndexState.pages.entries()]
+      .sort(([left], [right]) => left - right)
+      .reduce<RecipeCollectionItem[]>((all, [, page]) => {
+        const known = new Set(all.map((item) => item.document.id));
+        return [...all, ...page.filter((item) => !known.has(item.document.id))];
+      }, []);
+  }, [collectionIndexKey, collectionIndexState]);
+  const collectionRecipeEntries = useMemo(
+    () => collectionItems.map(recipeEntryFromCollectionItem),
+    [collectionItems],
+  );
+  const collectionIndexEntries = useMemo(
+    () => collectionIndexItems.map(recipeEntryFromCollectionItem),
+    [collectionIndexItems],
+  );
+  const availableCuisines = useMemo(
+    () => cuisineOptions(collectionIndexEntries),
+    [collectionIndexEntries],
+  );
+  const visibleRecipeDocuments = useMemo(
+    () =>
+      hasActiveFilters
+        ? appendUnique(
+            searchedRecipeDocuments,
+            collectionRecipeEntries.map(({ id, title }) => ({ id, title })),
+          )
+        : recipeDocuments,
+    [
+      collectionRecipeEntries,
+      hasActiveFilters,
+      recipeDocuments,
+      searchedRecipeDocuments,
+    ],
+  );
   const hasMore =
     Boolean(activeSpace) &&
     pageState !== null &&
@@ -375,7 +738,19 @@ export function RecipesLibrary() {
   const listLoaded = pageState?.spaceId === activeSpace?.id;
   const nextOffset =
     listLoaded && hasMore ? (pageState?.pagination.nextOffset ?? null) : null;
-
+  const searchHasMore =
+    Boolean(hasActiveFilters) &&
+    searchPageState?.key === currentSearchKey &&
+    searchPageState.pagination.hasMore;
+  const nextSearchOffset = searchHasMore
+    ? (searchPageState?.pagination.nextOffset ?? null)
+    : null;
+  const collectionHasMore =
+    collectionPageState?.key === currentCollectionKey &&
+    collectionPageState.pagination.hasMore;
+  const nextCollectionOffset = collectionHasMore
+    ? (collectionPageState?.pagination.nextOffset ?? null)
+    : null;
   const updateLocation = (
     recipeId: string | null,
     spaceId = activeSpace?.id,
@@ -465,6 +840,14 @@ export function RecipesLibrary() {
   const listError = documentsQuery.isError
     ? (actionErrorMessage(documentsQuery.error) ?? t("recipes.listError"))
     : null;
+  const searchError = searchDocumentsQuery.isError
+    ? (actionErrorMessage(searchDocumentsQuery.error) ??
+      t("recipes.searchError"))
+    : null;
+  const collectionItemsError = collectionItemsQuery.isError
+    ? (actionErrorMessage(collectionItemsQuery.error) ??
+      t("recipes.collectionReadError"))
+    : null;
   const detailError = documentQuery.isError
     ? (actionErrorMessage(documentQuery.error) ?? t("recipes.documentError"))
     : null;
@@ -476,20 +859,159 @@ export function RecipesLibrary() {
           aria-label={t("recipes.library")}
           className="min-w-0 rounded-lg border border-border bg-card"
         >
-          <div className="border-b border-border px-4 py-3">
+          <div className="flex items-center justify-between gap-2 border-b border-border px-4 py-3">
             <h2 className="text-sm font-semibold">{t("recipes.library")}</h2>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() => setIsCreatingRecipe(true)}
+            >
+              {t("recipes.addRecipe")}
+            </Button>
           </div>
-          {documentsQuery.isLoading && !listLoaded ? (
+          <div className="grid gap-3 border-b border-border p-3">
+            <div className="grid gap-1.5">
+              <Label htmlFor="recipe-library-search">
+                {t("recipes.librarySearch")}
+              </Label>
+              <Input
+                id="recipe-library-search"
+                type="search"
+                value={recipeSearch}
+                onChange={(event) => setRecipeSearch(event.currentTarget.value)}
+              />
+            </div>
+            <div className="grid gap-1.5">
+              <Label htmlFor="recipe-tag-filter">
+                {t("recipes.filterTags")}
+              </Label>
+              <Input
+                id="recipe-tag-filter"
+                type="search"
+                value={tagFilter}
+                onChange={(event) => setTagFilter(event.currentTarget.value)}
+              />
+            </div>
+            {recipeDatabases.length > 1 ? (
+              <div className="grid gap-1.5">
+                <Label htmlFor="recipe-library-collection">
+                  {t("recipes.chooseRecipeCollection")}
+                </Label>
+                <select
+                  id="recipe-library-collection"
+                  className="h-9 rounded-md border border-input bg-background px-3 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  value={selectedDatabaseId ?? ""}
+                  onChange={(event) =>
+                    setSelectedRecipeDatabaseId(
+                      event.currentTarget.value || null,
+                    )
+                  }
+                >
+                  <option value="">{t("recipes.chooseCollection")}</option>
+                  {recipeDatabases.map(
+                    (database: { databaseId: string; title: string }) => (
+                      <option
+                        key={database.databaseId}
+                        value={database.databaseId}
+                      >
+                        {database.title}
+                      </option>
+                    ),
+                  )}
+                </select>
+              </div>
+            ) : null}
+            <div className="grid gap-1.5">
+              <Label htmlFor="recipe-cuisine-filter">
+                {t("recipes.filterCuisine")}
+              </Label>
+              <Input
+                id="recipe-cuisine-filter"
+                list="recipe-cuisine-suggestions"
+                value={cuisineFilter}
+                placeholder={t("recipes.allCuisines")}
+                onChange={(event) =>
+                  setCuisineFilter(event.currentTarget.value)
+                }
+              />
+              <datalist id="recipe-cuisine-suggestions">
+                {availableCuisines.map((cuisine) => (
+                  <option key={cuisine} value={cuisine}>
+                    {cuisine}
+                  </option>
+                ))}
+              </datalist>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              {t("recipes.filterCoverage")}
+            </p>
+            {metadataFilterRequested && recipeDatabasesQuery.isError ? (
+              <PageError
+                description={
+                  actionErrorMessage(recipeDatabasesQuery.error) ??
+                  t("recipes.filterCollectionsError")
+                }
+                onRetry={() => void recipeDatabasesQuery.refetch()}
+                retrying={recipeDatabasesQuery.isFetching}
+              />
+            ) : null}
+            {metadataFilterRequested && recipeDatabaseQuery.isError ? (
+              <PageError
+                description={
+                  actionErrorMessage(recipeDatabaseQuery.error) ??
+                  t("recipes.collectionReadError")
+                }
+                onRetry={() => void recipeDatabaseQuery.refetch()}
+                retrying={recipeDatabaseQuery.isFetching}
+              />
+            ) : null}
+          </div>
+          {collectionChoiceRequired ? (
+            <p role="status" className="p-3 text-xs text-muted-foreground">
+              {t("recipes.filterChooseCollection")}
+            </p>
+          ) : missingMetadataFilter ? (
+            <p role="status" className="p-3 text-xs text-muted-foreground">
+              {t("recipes.filterMetadataUnavailable")}
+            </p>
+          ) : null}
+          {searchError ? (
+            <div className="p-3">
+              <PageError
+                description={searchError}
+                onRetry={() => void searchDocumentsQuery.refetch()}
+                retrying={searchDocumentsQuery.isFetching}
+              />
+            </div>
+          ) : collectionItemsError ? (
+            <div className="p-3">
+              <PageError
+                description={collectionItemsError}
+                onRetry={() => void collectionItemsQuery.refetch()}
+                retrying={collectionItemsQuery.isFetching}
+              />
+            </div>
+          ) : hasActiveFilters &&
+            (searchDocumentsQuery.isLoading ||
+              (selectedDatabaseId && collectionItemsQuery.isLoading)) &&
+            visibleRecipeDocuments.length === 0 ? (
             <div className="space-y-2 p-3" aria-busy="true">
               {Array.from({ length: 5 }, (_, index) => (
                 <Skeleton key={index} className="h-10 w-full" />
               ))}
             </div>
-          ) : recipeDocuments.length > 0 ? (
+          ) : documentsQuery.isLoading && !listLoaded && !hasActiveFilters ? (
+            <div className="space-y-2 p-3" aria-busy="true">
+              {Array.from({ length: 5 }, (_, index) => (
+                <Skeleton key={index} className="h-10 w-full" />
+              ))}
+            </div>
+          ) : visibleRecipeDocuments.length > 0 ? (
             <>
               <nav aria-label={t("recipes.library")}>
                 <ul className="divide-y divide-border">
-                  {recipeDocuments.map((document) => {
+                  {visibleRecipeDocuments.map((document) => {
                     const active = document.id === selectedRecipeId;
                     const params = new URLSearchParams();
                     params.set("spaceId", activeSpace.id);
@@ -519,35 +1041,99 @@ export function RecipesLibrary() {
                   />
                 </div>
               ) : null}
-              {nextOffset !== null ? (
+              {hasActiveFilters &&
+              (nextSearchOffset !== null || nextCollectionOffset !== null) ? (
                 <div className="border-t border-border p-3">
                   <Button
                     type="button"
                     className="w-full"
                     variant="outline"
                     size="sm"
-                    disabled={documentsQuery.isFetching}
-                    onClick={() =>
-                      setRequestedPage({
-                        spaceId: activeSpace.id,
-                        offset: nextOffset,
-                      })
+                    disabled={
+                      searchDocumentsQuery.isFetching ||
+                      collectionItemsQuery.isFetching
                     }
+                    onClick={() => {
+                      if (nextSearchOffset !== null) {
+                        setRequestedSearchPage({
+                          key: currentSearchKey,
+                          offset: nextSearchOffset,
+                        });
+                      }
+                      if (nextCollectionOffset !== null) {
+                        setRequestedCollectionPage({
+                          key: currentCollectionKey,
+                          offset: nextCollectionOffset,
+                        });
+                      }
+                    }}
                   >
-                    {documentsQuery.isFetching
+                    {searchDocumentsQuery.isFetching ||
+                    collectionItemsQuery.isFetching
+                      ? t("recipes.loadingMore")
+                      : t("recipes.loadMoreMatches")}
+                  </Button>
+                </div>
+              ) : !hasActiveFilters &&
+                (nextOffset !== null || nextCollectionOffset !== null) ? (
+                <div className="border-t border-border p-3">
+                  <Button
+                    type="button"
+                    className="w-full"
+                    variant="outline"
+                    size="sm"
+                    disabled={
+                      documentsQuery.isFetching ||
+                      collectionItemsQuery.isFetching
+                    }
+                    onClick={() => {
+                      if (nextOffset !== null) {
+                        setRequestedPage({
+                          spaceId: activeSpace.id,
+                          offset: nextOffset,
+                        });
+                      }
+                      if (nextCollectionOffset !== null) {
+                        setRequestedCollectionPage({
+                          key: currentCollectionKey,
+                          offset: nextCollectionOffset,
+                        });
+                      }
+                    }}
+                  >
+                    {documentsQuery.isFetching ||
+                    collectionItemsQuery.isFetching
                       ? t("recipes.loadingMore")
                       : t("recipes.loadMore")}
                   </Button>
                 </div>
               ) : null}
             </>
-          ) : listError ? (
+          ) : listError && !hasActiveFilters ? (
             <div className="p-3">
               <PageError
                 description={listError}
                 onRetry={() => void documentsQuery.refetch()}
                 retrying={documentsQuery.isFetching}
               />
+            </div>
+          ) : hasActiveFilters || (listLoaded && recipeDocuments.length > 0) ? (
+            <div className="grid justify-items-start gap-2 p-4">
+              <p className="text-sm text-muted-foreground">
+                {t("recipes.noMatchingRecipes")}
+              </p>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => {
+                  setRecipeSearch("");
+                  setCuisineFilter("");
+                  setTagFilter("");
+                }}
+              >
+                {t("recipes.clearFilters")}
+              </Button>
             </div>
           ) : listLoaded ? (
             <p className="p-4 text-sm text-muted-foreground">
@@ -560,7 +1146,148 @@ export function RecipesLibrary() {
           aria-label={t("recipes.viewer")}
           className="min-w-0 rounded-lg border border-border bg-card p-4 sm:p-6"
         >
-          {selectedRecipeId ? (
+          {isCreatingRecipe ? (
+            recipeDatabasesQuery.isError ? (
+              <PageError
+                description={
+                  actionErrorMessage(recipeDatabasesQuery.error) ??
+                  t("recipes.createCollectionError")
+                }
+                onRetry={() => void recipeDatabasesQuery.refetch()}
+                retrying={recipeDatabasesQuery.isFetching}
+              />
+            ) : recipeDatabasesQuery.isLoading || !recipeDatabasesQuery.data ? (
+              <div aria-busy="true" className="space-y-4">
+                <Skeleton className="h-8 w-64" />
+                <Skeleton className="h-48 w-full" />
+              </div>
+            ) : recipeDatabases.length === 0 ? (
+              <div className="grid justify-items-start gap-3">
+                <p className="text-sm text-muted-foreground">
+                  {t("recipes.createCollectionMissing")}
+                </p>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setIsCreatingRecipe(false)}
+                >
+                  {t("recipes.cancel")}
+                </Button>
+              </div>
+            ) : recipeDatabases.length > 1 && !selectedDatabaseId ? (
+              <div className="grid max-w-md gap-3">
+                <div className="grid gap-1.5">
+                  <Label htmlFor="recipe-database-choice">
+                    {t("recipes.chooseRecipeCollection")}
+                  </Label>
+                  <select
+                    id="recipe-database-choice"
+                    className="h-9 rounded-md border border-input bg-background px-3 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    value=""
+                    onChange={(event) =>
+                      setSelectedRecipeDatabaseId(event.currentTarget.value)
+                    }
+                  >
+                    <option value="">{t("recipes.chooseCollection")}</option>
+                    {recipeDatabases.map(
+                      (database: { databaseId: string; title: string }) => (
+                        <option
+                          key={database.databaseId}
+                          value={database.databaseId}
+                        >
+                          {database.title}
+                        </option>
+                      ),
+                    )}
+                  </select>
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="w-fit"
+                  onClick={() => setIsCreatingRecipe(false)}
+                >
+                  {t("recipes.cancel")}
+                </Button>
+              </div>
+            ) : recipeDatabaseResponse && !recipeDatabase ? (
+              <p role="alert" className="text-sm text-destructive">
+                {t("recipes.createCollectionUnavailable")}
+              </p>
+            ) : recipeDatabaseQuery.isError ? (
+              <PageError
+                description={
+                  actionErrorMessage(recipeDatabaseQuery.error) ??
+                  t("recipes.createCollectionError")
+                }
+                onRetry={() => void recipeDatabaseQuery.refetch()}
+                retrying={recipeDatabaseQuery.isFetching}
+              />
+            ) : recipeDatabaseQuery.isLoading || !recipeDatabase ? (
+              <div aria-busy="true" className="space-y-4">
+                <Skeleton className="h-8 w-64" />
+                <Skeleton className="h-48 w-full" />
+              </div>
+            ) : recipeDatabaseSpaceId !== activeSpace.id ||
+              mutationContract?.target?.spaceId !== activeSpace.id ? (
+              <p role="alert" className="text-sm text-destructive">
+                {t("recipes.createCollectionUnavailable")}
+              </p>
+            ) : !selectedFormView ||
+              !mutationContract?.schemaRevision ||
+              !mutationContract?.target ? (
+              <p role="alert" className="text-sm text-destructive">
+                {t("recipes.createFormUnavailable")}
+              </p>
+            ) : (
+              <>
+                {recipeDatabases.length > 1 ? (
+                  <div className="mb-4 grid max-w-md gap-1.5">
+                    <Label htmlFor="recipe-database-choice">
+                      {t("recipes.chooseRecipeCollection")}
+                    </Label>
+                    <select
+                      id="recipe-database-choice"
+                      className="h-9 rounded-md border border-input bg-background px-3 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      value={selectedDatabaseId ?? ""}
+                      onChange={(event) =>
+                        setSelectedRecipeDatabaseId(event.currentTarget.value)
+                      }
+                    >
+                      {recipeDatabases.map(
+                        (database: { databaseId: string; title: string }) => (
+                          <option
+                            key={database.databaseId}
+                            value={database.databaseId}
+                          >
+                            {database.title}
+                          </option>
+                        ),
+                      )}
+                    </select>
+                  </div>
+                ) : null}
+                <RecipeCreationForm
+                  onCancel={() => setIsCreatingRecipe(false)}
+                  onCreate={(recipe) => {
+                    const input = adaptRecipeCreateInput(recipe, {
+                      target: {
+                        spaceId: mutationContract.target.spaceId,
+                        databaseId: mutationContract.target.databaseId,
+                        databaseDocumentId:
+                          mutationContract.target.databaseDocumentId,
+                      },
+                      formViewId: selectedFormView.id,
+                      expectedSchemaRevision: mutationContract.schemaRevision,
+                    });
+                    return createRecipeMutation
+                      .mutateAsync(input)
+                      .then(adaptRecipeCreateResult);
+                  }}
+                />
+              </>
+            )
+          ) : selectedRecipeId ? (
             documentQuery.isLoading ? (
               <div aria-busy="true" className="space-y-4">
                 <Skeleton className="h-8 w-64" />
